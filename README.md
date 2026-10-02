@@ -1,33 +1,30 @@
 # mytender coding exercise
 
-A small, grounded tender-writing agent.
-
-The agent will plan a response, retrieve approved evidence, draft one section at a time, and stop when evidence is missing or contradictory.
+A small, grounded tender-writing agent. It plans a response, retrieves approved
+bidder evidence, and persists cited draft sections one at a time.
 
 ## Current state
 
-This repository currently contains the test and evaluation foundation. The product agent and interface are the next stage.
+The repository contains a bounded AI SDK tool loop, filesystem-backed workspace,
+deterministic tender tools, OpenRouter model configuration, and an evaluation
+runner. There is no interface yet.
 
-## Agent build plan
+## How it works
 
-The agent will be added in four small blocks:
+1. A validated JSON workspace holds requirements, source blocks, plan, draft,
+   retrieval history, warnings, and claims.
+2. Deterministic tools inspect that state, search and read evidence, write a plan,
+   and replace one draft section.
+3. A bounded model loop chooses those tools. The workspace—not the final chat
+   message—is the output.
+4. The same agent is a candidate in the evaluation runner; a separate model
+   judges only the semantic rubric after deterministic checks pass.
 
-1. Add persistent workspace state and deterministic tender tools.
-2. Add a bounded AI SDK tool loop with a mocked-model integration test.
-3. Add OpenRouter configuration and credential-safe failure handling.
-4. Connect the agent to the evaluation runner and record the first live results.
+Every tool is closed over one trusted workspace ID. The model cannot select a
+different workspace or use buyer requirements and marketing copy as evidence
+for bidder facts.
 
-After each block, run:
-
-```bash
-npm test
-npm run typecheck
-npm run eval:smoke
-```
-
-The original tender pack stays outside Git. Tests use sanitized fixtures and temporary workspaces. Each block is a separate commit and can be reverted independently.
-
-## Run the checks
+## Setup and checks
 
 ```bash
 npm ci
@@ -35,6 +32,9 @@ npm test
 npm run typecheck
 npm run eval:smoke
 ```
+
+Use Node.js 22 or newer. The original tender pack stays outside Git; tests use
+sanitized fixtures and temporary workspaces.
 
 `eval:smoke` runs three sanitized scenarios through the same schemas, preflight checks, runner, and report writer used by live evaluations:
 
@@ -59,9 +59,25 @@ A semantic judge scores only qualities such as groundedness, tailoring, scoreabi
 
 The candidate and judge are separate adapters. The candidate never receives fixture answer keys. The judge runs only after deterministic checks pass.
 
-## Stochastic evaluation
+## Live evaluation
 
-The runner accepts separate candidate and judge adapters and defaults to three runs per fixture. The application agent will become the candidate adapter when it exists. A live CLI would be premature before that integration.
+Set credentials in the environment, never in the repository:
+
+```bash
+export OPENROUTER_API_KEY=...
+export OPENROUTER_MODEL=provider/model
+npm run eval:live
+```
+
+The live runner uses separate candidate and judge adapters and defaults to three
+runs per fixture. For a fast first baseline, use
+`EVAL_REPEATS=1 npm run eval:live`.
+
+The current agent should handle the clean grounded-answer case. The missing case
+study and contradictory-security scenarios are intentionally the next red bar:
+the workspace models warnings, gaps, and conflicting claims, but the model does
+not yet have a tool that can persist them. Deterministic preflight should stop
+those outputs before the semantic judge.
 
 ## Data safety
 
@@ -71,7 +87,16 @@ The supplied tender pack is excluded from Git because it contains confidential a
 
 ```text
 src/domain/          Tender evidence and draft policies
+src/agent/           Persistent workspace, tools, model loop, provider config
 src/evals/           Evaluation schemas, checks, runner, and fixtures
+tests/agent/         Tool, loop, and provider tests
 tests/domain/        Domain policy tests
 tests/evals/         Evaluation harness tests
 ```
+
+## With more time
+
+The next block would add one deterministic tool for recording evidence gaps,
+conflicts, and claim status, then use the red live fixtures to drive it green.
+After that: a minimal question/document interface with section-level feedback,
+real document ingestion, and resumable runs for long bids.
