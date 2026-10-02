@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MockLanguageModelV4 } from "ai/test";
@@ -40,8 +40,10 @@ async function createService(question = "Summarise the delivery outcome.", ready
   await store.save(workspace);
   const skillRoot = await mkdtemp(join(tmpdir(), "mytender-agent-skills-"));
   temporaryRoots.push(skillRoot);
-  await writeFile(join(skillRoot, "tender-drafting.md"), "Draft the tender.\n");
-  await writeFile(join(skillRoot, "evidence-assessment.md"), "Assess the evidence.\n");
+  await mkdir(join(skillRoot, "tender-drafting"), { recursive: true });
+  await mkdir(join(skillRoot, "evidence-assessment"), { recursive: true });
+  await writeFile(join(skillRoot, "tender-drafting", "SKILL.md"), "---\nname: tender-drafting\ndescription: Draft the tender.\n---\nDraft the tender.\n");
+  await writeFile(join(skillRoot, "evidence-assessment", "SKILL.md"), "---\nname: evidence-assessment\ndescription: Assess the evidence.\n---\nAssess the evidence.\n");
   return { service: new TenderToolService(store), workspaceId: workspace.id, skillCatalog: new FileAgentSkillCatalog(skillRoot) };
 }
 
