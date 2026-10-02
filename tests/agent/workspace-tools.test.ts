@@ -96,6 +96,12 @@ describe("filesystem workspace tender tools", () => {
 
   it("updates only the targeted draft section", async () => {
     const { service } = await createService();
+    await service.writePlan("sanitized-workspace", {
+      sections: [
+        { id: "outcomes", heading: "Outcomes", requirementIds: ["outcome"] },
+        { id: "security", heading: "Security", requirementIds: ["security"] },
+      ],
+    });
     await service.writeSection("sanitized-workspace", {
       id: "outcomes", heading: "Outcomes", content: "Original outcome.", requirementIds: ["outcome"], citations: [{ sourceBlockId: "fact-alpha" }],
     });
@@ -110,5 +116,25 @@ describe("filesystem workspace tender tools", () => {
       { id: "outcomes", heading: "Outcomes", content: "Updated outcome.", requirementIds: ["outcome"], citations: [{ sourceBlockId: "fact-alpha" }] },
       { id: "security", heading: "Security", content: "Secure onboarding.", requirementIds: ["security"], citations: [{ sourceBlockId: "fact-beta" }] },
     ]);
+  });
+
+  it("requires planned sections supported by bidder facts", async () => {
+    const { service } = await createService();
+    const section = {
+      id: "outcomes", heading: "Outcomes", content: "Customer outcome.", requirementIds: ["outcome"], citations: [{ sourceBlockId: "fact-alpha" }],
+    };
+
+    await expect(service.writeSection("sanitized-workspace", section)).rejects.toThrow("response plan");
+    await service.writePlan("sanitized-workspace", {
+      sections: [{ id: "security", heading: "Security", requirementIds: ["security"] }],
+    });
+    await expect(service.writeSection("sanitized-workspace", section)).rejects.toThrow("not in the response plan: outcomes");
+    await expect(service.writeSection("sanitized-workspace", {
+      ...section,
+      id: "security",
+      heading: "Security",
+      requirementIds: ["security"],
+      citations: [{ sourceBlockId: "buyer-alpha" }],
+    })).rejects.toThrow("bidder_fact evidence: buyer-alpha");
   });
 });

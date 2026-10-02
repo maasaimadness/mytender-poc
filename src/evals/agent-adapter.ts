@@ -10,6 +10,7 @@ import type { EvaluationInput } from "./schemas.js";
 /** Runs the persisted tender-writing agent as an evaluation candidate. */
 export class TenderAgentCandidateAdapter implements CandidateAdapter {
   readonly id = "tender-agent-v1";
+  private static readonly workspaceId = "evaluation-workspace";
 
   public constructor(private readonly model: LanguageModel) {}
 
@@ -18,7 +19,7 @@ export class TenderAgentCandidateAdapter implements CandidateAdapter {
     try {
       const store = new FileWorkspaceStore(root);
       const workspace: Workspace = {
-        id: input.fixtureId,
+        id: TenderAgentCandidateAdapter.workspaceId,
         question: input.question,
         sourceDocuments: input.sourceDocuments,
         sourceBlocks: input.evidenceBlocks,

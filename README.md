@@ -17,8 +17,9 @@ runner. There is no interface yet.
    and replace one draft section.
 3. A bounded model loop chooses those tools. The workspace—not the final chat
    message—is the output.
-4. The same agent is a candidate in the evaluation runner; a separate model
-   judges only the semantic rubric after deterministic checks pass.
+4. The same agent is a candidate in the evaluation runner; a separate judge
+   adapter invocation evaluates only the semantic rubric after deterministic
+   checks pass.
 
 Every tool is closed over one trusted workspace ID. The model cannot select a
 different workspace or use buyer requirements and marketing copy as evidence
@@ -50,14 +51,14 @@ Deterministic code checks facts that do not need model judgement:
 
 - source roles and allowed evidence;
 - citation resolution;
-- conflicting or unsupported claims;
+- declared claim/source relationships, including bidder-fact citation roles;
 - requirement coverage and missing evidence;
 - word limits;
 - report integrity.
 
-A semantic judge scores only qualities such as groundedness, tailoring, scoreability, and writing quality.
+A semantic judge scores semantic groundedness, tailoring, scoreability, and writing quality.
 
-The candidate and judge are separate adapters. The candidate never receives fixture answer keys. The judge runs only after deterministic checks pass.
+The candidate and judge are separate adapters backed by the same configured model instance. The candidate never receives fixture answer keys. The judge runs only after deterministic checks pass. Deterministic validation checks declared claim/source relationships; semantic groundedness remains judge-scored.
 
 ## Live evaluation
 

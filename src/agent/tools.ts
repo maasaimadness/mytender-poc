@@ -100,10 +100,19 @@ export class TenderToolService {
   public async writeSection(workspaceId: string, section: DraftSection): Promise<Workspace> {
     const workspace = await this.store.load(workspaceId);
     const validatedSection = draftSectionSchema.parse(section);
+    if (!workspace.plan) throw new Error("A response plan must be written before drafting sections.");
+    if (!workspace.plan.sections.some((planSection) => planSection.id === validatedSection.id)) {
+      throw new Error(`Section is not in the response plan: ${validatedSection.id}`);
+    }
     validateRequirementIds(workspace, validatedSection.requirementIds);
-    const blocksById = new Set(workspace.sourceBlocks.map((block) => block.id));
+    const blocksById = new Map(workspace.sourceBlocks.map((block) => [block.id, block]));
+    const documentsById = new Map(workspace.sourceDocuments.map((document) => [document.id, document]));
     for (const citation of validatedSection.citations) {
-      if (!blocksById.has(citation.sourceBlockId)) throw new Error(`Unknown source block ID: ${citation.sourceBlockId}`);
+      const block = blocksById.get(citation.sourceBlockId);
+      if (!block) throw new Error(`Unknown source block ID: ${citation.sourceBlockId}`);
+      if (documentsById.get(block.documentId)?.role !== "bidder_fact") {
+        throw new Error(`Citation source block must be bidder_fact evidence: ${citation.sourceBlockId}`);
+      }
     }
     const currentSections = workspace.draft?.sections ?? [];
     const exists = currentSections.some((current) => current.id === validatedSection.id);

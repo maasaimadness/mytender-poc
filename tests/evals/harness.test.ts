@@ -1,5 +1,6 @@
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -224,10 +225,15 @@ describe("evaluation harness", () => {
 
   it("writes only schema-validated report fields", async () => {
     const report = await runEvaluation(await fixture("security-conflict"), candidate, judge, { repeats: 1 });
-    const path = resolve("eval-results", "harness-test-report.json");
-    await writeReport(path, report);
-    await writeReport(path, { ...report, rawResponse: "discarded", evidenceBlocks: [] } as never);
-    expect(await readFile(path, "utf8")).not.toMatch(/rawResponse|evidenceBlocks/);
+    const root = await mkdtemp(join(tmpdir(), "mytender-report-"));
+    try {
+      const path = join(root, "harness-test-report.json");
+      await writeReport(path, report);
+      await writeReport(path, { ...report, rawResponse: "discarded", evidenceBlocks: [] } as never);
+      expect(await readFile(path, "utf8")).not.toMatch(/rawResponse|evidenceBlocks/);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
 
   });
 });
