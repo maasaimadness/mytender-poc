@@ -43,6 +43,26 @@ async function createService(): Promise<{ service: TenderToolService; store: Fil
   return { service: new TenderToolService(store), store, workspace };
 }
 
+function pauseFirstLoad(store: FileWorkspaceStore): { firstLoadStarted: Promise<void>; releaseFirstLoad: () => void; loadCalls: () => number } {
+  let resolveFirstLoadStarted!: () => void;
+  let releaseFirstLoad!: () => void;
+  let calls = 0;
+  const firstLoadStarted = new Promise<void>((resolve) => { resolveFirstLoadStarted = resolve; });
+  const firstLoadReleased = new Promise<void>((resolve) => { releaseFirstLoad = resolve; });
+  const load = store.load.bind(store);
+
+  store.load = async (workspaceId) => {
+    calls += 1;
+    if (calls === 1) {
+      resolveFirstLoadStarted();
+      await firstLoadReleased;
+    }
+    return load(workspaceId);
+  };
+
+  return { firstLoadStarted, releaseFirstLoad, loadCalls: () => calls };
+}
+
 describe("filesystem workspace tender tools", () => {
   it("persists mutations and reloads validated workspace state", async () => {
     const { service, store } = await createService();
@@ -76,9 +96,58 @@ describe("filesystem workspace tender tools", () => {
     expect(results.map(({ block }) => block.id)).toEqual(["fact-beta", "fact-gamma"]);
   });
 
+  it("serializes concurrent evidence retrieval operations without losing retrieved block IDs", async () => {
+    const { service, store } = await createService();
+    const gate = pauseFirstLoad(store);
+    const search = service.searchEvidence("sanitized-workspace", "twenty", { role: "bidder_fact" });
+    await gate.firstLoadStarted;
+    const read = service.readSourceBlocks("sanitized-workspace", ["fact-beta"]);
+    expect(gate.loadCalls()).toBe(1);
+    gate.releaseFirstLoad();
+
+    await Promise.all([search, read]);
+
+    const workspace = await service.inspectWorkspace("sanitized-workspace");
+    expect(workspace.retrievedBlockIds).toEqual(["fact-alpha", "fact-beta"]);
+    expect(workspace.events.map((event) => event.type)).toEqual(["evidence_searched", "source_blocks_read"]);
+  });
+
+  it("serializes queued mutations before a workspace review", async () => {
+    const { service, store } = await createService();
+    const gate = pauseFirstLoad(store);
+    const plan = service.writePlan("sanitized-workspace", {
+      sections: [{ id: "outcomes", heading: "Outcomes", requirementIds: ["outcome"] }],
+    });
+    await gate.firstLoadStarted;
+    const assessment = service.recordEvidenceAssessment("sanitized-workspace", {
+      claims: [{ id: "outcome-claim", text: "Outcome", sourceBlockIds: ["fact-alpha"], status: "supported" }],
+    });
+    const review = service.reviewWorkspace("sanitized-workspace");
+    expect(gate.loadCalls()).toBe(1);
+    gate.releaseFirstLoad();
+
+    const [, , reviewed] = await Promise.all([plan, assessment, review]);
+    const workspace = await service.inspectWorkspace("sanitized-workspace");
+
+    expect(workspace.plan?.sections).toEqual([{ id: "outcomes", heading: "Outcomes", requirementIds: ["outcome"] }]);
+    expect(workspace.claims).toEqual([{ id: "outcome-claim", text: "Outcome", sourceBlockIds: ["fact-alpha"], status: "supported" }]);
+    expect(reviewed.warningCodes).toEqual(["INSUFFICIENT_EVIDENCE"]);
+    expect(workspace.events.map((event) => event.type)).toEqual(["plan_written", "evidence_assessment_recorded"]);
+  });
+
   it("fails explicitly when a requested source block is unknown", async () => {
     const { service } = await createService();
     await expect(service.readSourceBlocks("sanitized-workspace", ["missing-block"])).rejects.toThrow("Unknown source block ID: missing-block");
+  });
+
+  it("continues queued operations after a rejected operation", async () => {
+    const { service } = await createService();
+    const rejected = service.readSourceBlocks("sanitized-workspace", ["missing-block"]);
+    const valid = service.readSourceBlocks("sanitized-workspace", ["fact-beta"]);
+
+    await expect(rejected).rejects.toThrow("Unknown source block ID: missing-block");
+    await expect(valid).resolves.toEqual([expect.objectContaining({ id: "fact-beta" })]);
+    expect((await service.inspectWorkspace("sanitized-workspace")).retrievedBlockIds).toEqual(["fact-beta"]);
   });
 
   it("rejects plans with duplicate sections or unknown requirements", async () => {

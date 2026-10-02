@@ -149,58 +149,75 @@ export interface EvidenceSearchResult {
 
 /** Deterministic stateful operations intended for a bounded agent tool loop. */
 export class TenderToolService {
+  /**
+   * Service calls share one FIFO so each load/modify/save sequence sees all
+   * earlier calls. The tail always resolves, allowing a later call to proceed
+   * after an earlier validation or storage failure.
+   */
+  private operationTail: Promise<void> = Promise.resolve();
+
   public constructor(private readonly store: FileWorkspaceStore) {}
 
   public inspectWorkspace(workspaceId: string): Promise<Workspace> {
-    return this.store.load(workspaceId);
+    return this.enqueue(() => this.store.load(workspaceId));
   }
 
-  public async searchEvidence(
+  public searchEvidence(
     workspaceId: string,
     query: string,
     options?: { role?: SourceRole; limit?: number },
   ): Promise<EvidenceSearchResult[]> {
-    const validatedOptions = searchOptionsSchema.parse(options);
-    const workspace = await this.store.load(workspaceId);
-    const queryTokens = tokenise(query);
-    const documentsById = new Map(workspace.sourceDocuments.map((document) => [document.id, document]));
-    const results = workspace.sourceBlocks
-      .filter((block) => !validatedOptions?.role || documentsById.get(block.documentId)?.role === validatedOptions.role)
-      .map((block) => ({
-        block,
-        score: [...tokenise(block.text)].filter((token) => queryTokens.has(token)).length,
-      }))
-      .filter((result) => result.score > 0)
-      .sort((left, right) => right.score - left.score || left.block.id.localeCompare(right.block.id))
-      .slice(0, validatedOptions?.limit ?? 5);
+    return this.enqueue(async () => {
+      const validatedOptions = searchOptionsSchema.parse(options);
+      const workspace = await this.store.load(workspaceId);
+      const queryTokens = tokenise(query);
+      const documentsById = new Map(workspace.sourceDocuments.map((document) => [document.id, document]));
+      const results = workspace.sourceBlocks
+        .filter((block) => !validatedOptions?.role || documentsById.get(block.documentId)?.role === validatedOptions.role)
+        .map((block) => ({
+          block,
+          score: [...tokenise(block.text)].filter((token) => queryTokens.has(token)).length,
+        }))
+        .filter((result) => result.score > 0)
+        .sort((left, right) => right.score - left.score || left.block.id.localeCompare(right.block.id))
+        .slice(0, validatedOptions?.limit ?? 5);
 
-    const retrievedBlockIds = [...new Set([...workspace.retrievedBlockIds, ...results.map((result) => result.block.id)])];
-    await this.store.save(appendEvent({ ...workspace, retrievedBlockIds }, "evidence_searched", `Retrieved ${results.length} evidence block(s).`));
-    return results;
-  }
-
-  public async readSourceBlocks(workspaceId: string, blockIds: readonly string[]): Promise<SourceBlock[]> {
-    const workspace = await this.store.load(workspaceId);
-    const blocksById = new Map(workspace.sourceBlocks.map((block) => [block.id, block]));
-    const blocks = blockIds.map((id) => {
-      const block = blocksById.get(id);
-      if (!block) throw new Error(`Unknown source block ID: ${id}`);
-      return block;
+      const retrievedBlockIds = [...new Set([...workspace.retrievedBlockIds, ...results.map((result) => result.block.id)])];
+      await this.store.save(appendEvent({ ...workspace, retrievedBlockIds }, "evidence_searched", `Retrieved ${results.length} evidence block(s).`));
+      return results;
     });
-    const retrievedBlockIds = [...new Set([...workspace.retrievedBlockIds, ...blockIds])];
-    await this.store.save(appendEvent({ ...workspace, retrievedBlockIds }, "source_blocks_read", `Read ${blocks.length} source block(s).`));
-    return blocks;
   }
 
-  public async writePlan(workspaceId: string, plan: ResponsePlan): Promise<Workspace> {
-    const workspace = await this.store.load(workspaceId);
-    const validatedPlan = validatePlan(workspace, plan);
-    const updated = appendEvent({ ...workspace, plan: validatedPlan }, "plan_written", `Saved ${validatedPlan.sections.length} plan section(s).`);
-    await this.store.save(updated);
-    return updated;
+  public readSourceBlocks(workspaceId: string, blockIds: readonly string[]): Promise<SourceBlock[]> {
+    return this.enqueue(async () => {
+      const workspace = await this.store.load(workspaceId);
+      const blocksById = new Map(workspace.sourceBlocks.map((block) => [block.id, block]));
+      const blocks = blockIds.map((id) => {
+        const block = blocksById.get(id);
+        if (!block) throw new Error(`Unknown source block ID: ${id}`);
+        return block;
+      });
+      const retrievedBlockIds = [...new Set([...workspace.retrievedBlockIds, ...blockIds])];
+      await this.store.save(appendEvent({ ...workspace, retrievedBlockIds }, "source_blocks_read", `Read ${blocks.length} source block(s).`));
+      return blocks;
+    });
   }
 
-  public async writeSection(workspaceId: string, section: DraftSection): Promise<Workspace> {
+  public writePlan(workspaceId: string, plan: ResponsePlan): Promise<Workspace> {
+    return this.enqueue(async () => {
+      const workspace = await this.store.load(workspaceId);
+      const validatedPlan = validatePlan(workspace, plan);
+      const updated = appendEvent({ ...workspace, plan: validatedPlan }, "plan_written", `Saved ${validatedPlan.sections.length} plan section(s).`);
+      await this.store.save(updated);
+      return updated;
+    });
+  }
+
+  public writeSection(workspaceId: string, section: DraftSection): Promise<Workspace> {
+    return this.enqueue(() => this.writeSectionQueued(workspaceId, section));
+  }
+
+  private async writeSectionQueued(workspaceId: string, section: DraftSection): Promise<Workspace> {
     const workspace = await this.store.load(workspaceId);
     const validatedSection = draftSectionSchema.parse(section);
     if (!workspace.plan) throw new Error("A response plan must be written before drafting sections.");
@@ -231,7 +248,11 @@ export class TenderToolService {
   }
 
   /** Replaces the complete evidence assessment in one validated, atomic workspace write. */
-  public async recordEvidenceAssessment(workspaceId: string, assessment: EvidenceAssessment): Promise<Workspace> {
+  public recordEvidenceAssessment(workspaceId: string, assessment: EvidenceAssessment): Promise<Workspace> {
+    return this.enqueue(() => this.recordEvidenceAssessmentQueued(workspaceId, assessment));
+  }
+
+  private async recordEvidenceAssessmentQueued(workspaceId: string, assessment: EvidenceAssessment): Promise<Workspace> {
     const validatedAssessment = evidenceAssessmentSchema.parse(assessment);
     const workspace = await this.store.load(workspaceId);
     validateRequirementIds(workspace, (validatedAssessment.missingEvidence ?? []).map((entry) => entry.requirementId));
@@ -275,8 +296,17 @@ export class TenderToolService {
     return updated;
   }
 
-  public async reviewWorkspace(workspaceId: string): Promise<WorkspaceReview> {
-    return reviewWorkspaceState(await this.store.load(workspaceId));
+  public reviewWorkspace(workspaceId: string): Promise<WorkspaceReview> {
+    return this.enqueue(async () => reviewWorkspaceState(await this.store.load(workspaceId)));
+  }
+
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.operationTail.then(operation);
+    this.operationTail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
   }
 }
 
