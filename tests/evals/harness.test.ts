@@ -12,6 +12,7 @@ import { writeReport } from "../../src/evals/report.js";
 import { aggregate, reportPasses, runEvaluation } from "../../src/evals/runner.js";
 import {
   candidateOutputSchema,
+  evaluationInputSchema,
   evaluationReportSchema,
   evaluationRunSchema,
   semanticRubricSchema,
@@ -62,8 +63,20 @@ describe("evaluation harness", () => {
     expect(candidateInput).not.toHaveProperty("forbiddenClaims");
     expect(candidateInput).not.toHaveProperty("expectedWarningCodes");
     expect(candidateInput).not.toHaveProperty("semanticRubric");
+    expect(candidateInput).toHaveProperty("conflictingEvidenceGroups", []);
     expect(capturedJudgeInput).not.toHaveProperty("expectedWarningCodes");
     expect(capturedJudgeInput).not.toHaveProperty("forbiddenClaims");
+  });
+
+  it("validates preprocessed conflicting-evidence metadata in candidate input", () => {
+    const base = {
+      fixtureId: "fixture", question: "Question", requirements: [{ id: "requirement", text: "Requirement", mandatory: true }],
+      sourceDocuments: [{ id: "facts", role: "bidder_fact", title: "Facts" }],
+      evidenceBlocks: [{ id: "fact", documentId: "facts", locator: "derived:1", text: "Fact" }],
+    };
+    expect(evaluationInputSchema.parse(base).conflictingEvidenceGroups).toEqual([]);
+    expect(() => evaluationInputSchema.parse({ ...base, conflictingEvidenceGroups: [["fact", "fact"]] })).toThrow("must be unique");
+    expect(() => evaluationInputSchema.parse({ ...base, conflictingEvidenceGroups: [["fact", "missing"]] })).toThrow("Unknown evidence block");
   });
 
   it("fails invalid candidate and judge outputs at their schemas", async () => {

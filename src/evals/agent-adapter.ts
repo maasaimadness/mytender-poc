@@ -34,7 +34,7 @@ export class TenderAgentCandidateAdapter implements CandidateAdapter {
         claims: [],
         retrievedBlockIds: [],
         events: [],
-        conflictingEvidenceGroups: [],
+        conflictingEvidenceGroups: input.conflictingEvidenceGroups,
       };
       await store.save(workspace);
 
@@ -50,7 +50,8 @@ export class TenderAgentCandidateAdapter implements CandidateAdapter {
       });
 
       return {
-        ...(result.workspace.draft === undefined ? {} : { draft: result.workspace.draft }),
+        // The adapter response must remain schema-valid even when the agent elects not to draft.
+        draft: result.workspace.draft ?? { id: `draft-${workspace.id}`, sections: [] },
         warnings: result.workspace.warnings,
         missingEvidence: result.workspace.missingEvidence,
         retrievedBlockIds: result.workspace.retrievedBlockIds,

@@ -28,12 +28,17 @@ export const missingEvidenceSchema = z.object({
   reason: z.string().min(1),
 });
 
+/** Preprocessed source metadata identifying evidence blocks that cannot be reconciled. */
+const conflictingEvidenceGroupsSchema = z.array(z.array(z.string().min(1)).min(2)).default([]);
+
 export const evaluationInputSchema = z.object({
   fixtureId: z.string().min(1),
   question: z.string().min(1),
   requirements: z.array(requirementSchema).min(1),
   sourceDocuments: z.array(sourceDocumentSchema).min(1),
   evidenceBlocks: z.array(sourceBlockSchema),
+  // Conflict groups are source metadata supplied to the candidate workspace, not eval answer expectations.
+  conflictingEvidenceGroups: conflictingEvidenceGroupsSchema,
   maximumWords: z.number().int().positive().optional(),
 }).superRefine((input, context) => {
   addDuplicateIssues(input.requirements.map((requirement) => requirement.id), context, ["requirements"], "Requirement IDs");
@@ -43,6 +48,15 @@ export const evaluationInputSchema = z.object({
   for (const [index, block] of input.evidenceBlocks.entries()) {
     if (!documentIds.has(block.documentId)) {
       context.addIssue({ code: "custom", path: ["evidenceBlocks", index, "documentId"], message: `Unknown source document: ${block.documentId}` });
+    }
+  }
+  const blockIds = new Set(input.evidenceBlocks.map((block) => block.id));
+  for (const [index, group] of input.conflictingEvidenceGroups.entries()) {
+    addDuplicateIssues(group, context, ["conflictingEvidenceGroups", index], "Conflicting evidence block IDs");
+    for (const id of group) {
+      if (!blockIds.has(id)) {
+        context.addIssue({ code: "custom", path: ["conflictingEvidenceGroups", index], message: `Unknown evidence block: ${id}` });
+      }
     }
   }
 });
@@ -91,7 +105,6 @@ export const evaluationFixtureSchema = z.object({
   scenario: z.enum(["clean_generation", "partial_draft", "conflict_safe_failure"]),
   input: evaluationInputSchema,
   allowedEvidenceBlockIds: z.array(z.string().min(1)),
-  conflictingEvidenceGroups: z.array(z.array(z.string().min(1)).min(2)).default([]),
   forbiddenClaims: z.array(z.string().min(1)),
   expectedWarningCodes: z.array(warningSchema.shape.code),
   expectedMissingRequirementIds: z.array(z.string().min(1)),
@@ -103,12 +116,6 @@ export const evaluationFixtureSchema = z.object({
   const blockIds = new Set(fixture.input.evidenceBlocks.map((block) => block.id));
   for (const id of fixture.allowedEvidenceBlockIds) {
     if (!blockIds.has(id)) context.addIssue({ code: "custom", path: ["allowedEvidenceBlockIds"], message: `Unknown evidence block: ${id}` });
-  }
-  for (const [index, group] of fixture.conflictingEvidenceGroups.entries()) {
-    addDuplicateIssues(group, context, ["conflictingEvidenceGroups", index], "Conflicting evidence block IDs");
-    for (const id of group) {
-      if (!blockIds.has(id)) context.addIssue({ code: "custom", path: ["conflictingEvidenceGroups", index], message: `Unknown evidence block: ${id}` });
-    }
   }
   addDuplicateIssues(fixture.allowedEvidenceBlockIds, context, ["allowedEvidenceBlockIds"], "Allowed evidence block IDs");
   addDuplicateIssues(fixture.expectedWarningCodes, context, ["expectedWarningCodes"], "Expected warning codes");

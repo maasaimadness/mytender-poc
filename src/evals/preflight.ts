@@ -60,14 +60,14 @@ export function preflight(fixture: EvaluationFixture, output: CandidateOutput): 
     .filter((claim) => claim.status === "supported")
     .flatMap((claim) => {
       const assessed = assessClaim(claim, fixture.input.sourceDocuments, fixture.input.evidenceBlocks);
-      const conflicts = fixture.conflictingEvidenceGroups
+      const conflicts = fixture.input.conflictingEvidenceGroups
         .filter((group) => claim.sourceBlockIds.some((id) => group.includes(id)))
         .map((group) => `Conflicting evidence: ${group.join(",")}`);
       return assessed.status === "supported" && conflicts.length === 0
         ? []
         : [`${claim.id}:${[...assessed.reasons, ...conflicts].join("; ")}`];
     });
-  const unflaggedConflictGroups = fixture.conflictingEvidenceGroups
+  const unflaggedConflictGroups = fixture.input.conflictingEvidenceGroups
     .filter((group) => !output.claims.some((claim) =>
       claim.status === "conflicting" && group.every((id) => claim.sourceBlockIds.includes(id))))
     .map((group) => group.join(","));
