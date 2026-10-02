@@ -2,11 +2,12 @@ import { ToolLoopAgent, isStepCount, tool, type LanguageModel } from "ai";
 import { z } from "zod";
 
 import { draftSectionSchema, sourceRoleSchema } from "../domain/index.js";
+import { agentSkillIdSchema, type AgentSkillCatalog } from "./skills.js";
 import { evidenceAssessmentSchema, TenderToolService } from "./tools.js";
 import { responsePlanSchema, type Workspace } from "./workspace.js";
 
-/** A small bound keeps one tender-writing turn finite while allowing a useful plan-and-draft sequence. */
-const MAX_AGENT_STEPS = 8;
+/** A small bound keeps one tender-writing turn finite while allowing skill loading and tender work. */
+const MAX_AGENT_STEPS = 10;
 
 const workspaceSummary = (workspace: Workspace) => ({
   id: workspace.id,
@@ -28,26 +29,28 @@ export interface CreateTenderAgentOptions {
   model: LanguageModel;
   service: TenderToolService;
   workspaceId: string;
+  skillCatalog: AgentSkillCatalog;
 }
 
 /**
  * Creates a tool loop whose tools are permanently scoped to one trusted workspace.
  * Workspace IDs are intentionally absent from all model-visible tool inputs.
  */
-export function createTenderAgent({ model, service, workspaceId }: CreateTenderAgentOptions) {
+export function createTenderAgent({ model, service, workspaceId, skillCatalog }: CreateTenderAgentOptions) {
   return new ToolLoopAgent({
     model,
     instructions: [
       "Work only from the provided tender workspace tools.",
-      "Inspect the workspace before planning or drafting.",
-      "Write a plan before drafting, then write each section separately.",
-      "For factual claims, retrieve bidder_fact evidence, read its source blocks, and cite their block IDs.",
-      "Never invent facts or missing evidence; preserve gaps as missing evidence.",
-      "Before finishing, record the complete evidence assessment and review workspace readiness.",
+      "Before task work, load the relevant approved skill.",
       "The persisted workspace is the final artifact; keep any final response brief.",
     ].join(" "),
     stopWhen: isStepCount(MAX_AGENT_STEPS),
     tools: {
+      loadSkill: tool({
+        description: "Load instructions for an approved repository skill by ID.",
+        inputSchema: z.object({ id: agentSkillIdSchema }),
+        execute: async ({ id }) => skillCatalog.load(id),
+      }),
       inspectWorkspace: tool({
         description: "Inspect the current workspace state before planning or drafting.",
         inputSchema: z.object({}),
@@ -109,10 +112,10 @@ export interface RunTenderAgentOptions extends CreateTenderAgentOptions {
   prompt: string;
 }
 
-export async function runTenderAgent({ model, service, workspaceId, prompt }: RunTenderAgentOptions): Promise<{
+export async function runTenderAgent({ model, service, workspaceId, skillCatalog, prompt }: RunTenderAgentOptions): Promise<{
   workspace: Workspace;
   text: string;
 }> {
-  const result = await createTenderAgent({ model, service, workspaceId }).generate({ prompt });
+  const result = await createTenderAgent({ model, service, workspaceId, skillCatalog }).generate({ prompt });
   return { workspace: await service.inspectWorkspace(workspaceId), text: result.text };
 }

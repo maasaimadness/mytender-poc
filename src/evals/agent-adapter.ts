@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { LanguageModel } from "ai";
 
-import { FileWorkspaceStore, runTenderAgent, TenderToolService, type Workspace } from "../agent/index.js";
+import { FileWorkspaceStore, runTenderAgent, TenderToolService, type AgentSkillCatalog, type Workspace } from "../agent/index.js";
 import type { CandidateAdapter } from "./adapters.js";
 import type { EvaluationInput } from "./schemas.js";
 
@@ -12,7 +12,7 @@ export class TenderAgentCandidateAdapter implements CandidateAdapter {
   readonly id = "tender-agent-v1";
   private static readonly workspaceId = "evaluation-workspace";
 
-  public constructor(private readonly model: LanguageModel) {}
+  public constructor(private readonly model: LanguageModel, private readonly skillCatalog: AgentSkillCatalog) {}
 
   async generate(input: EvaluationInput): Promise<unknown> {
     const root = await mkdtemp(join(tmpdir(), "mytender-eval-"));
@@ -38,6 +38,7 @@ export class TenderAgentCandidateAdapter implements CandidateAdapter {
         model: this.model,
         service,
         workspaceId: workspace.id,
+        skillCatalog: this.skillCatalog,
         prompt: "Draft a concise response addressing every workspace requirement using cited bidder evidence.",
       });
 

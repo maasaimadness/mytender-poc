@@ -1,6 +1,7 @@
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 
+import { FileAgentSkillCatalog } from "../../src/agent/index.js";
 import { TenderAgentCandidateAdapter } from "../../src/evals/agent-adapter.js";
 import { OfflineSemanticJudgeAdapter } from "../../src/evals/adapters.js";
 import { loadFixtures } from "../../src/evals/fixtures.js";
@@ -38,7 +39,7 @@ describe("tender agent candidate adapter", () => {
 
     const report = await runEvaluation(
       fixture,
-      new TenderAgentCandidateAdapter(model),
+      new TenderAgentCandidateAdapter(model, new FileAgentSkillCatalog("skills")),
       new OfflineSemanticJudgeAdapter(),
       { repeats: 1 },
     );
