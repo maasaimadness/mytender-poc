@@ -11,9 +11,10 @@ assessment, or review state.
 
 ## Inputs and source roles
 
-Start with `inspectWorkspace`. Use its `question`, `requirements`, current
-`plan`, `draft`, `missingEvidence`, and source inventory to decide the next
-action. Treat `buyer_requirement` as the buyer's requested outcome and
+Start with `inspectWorkspace`. Use its `question`, `maximumWords`, `requirements`,
+current `plan`, `draft`, `missingEvidence`, and source inventory to decide the
+next action. Before assessment, explicitly load `evidence-assessment`. Treat
+`buyer_requirement` as the buyer's requested outcome and
 `exercise_contract` as tender context. Use `bidder_fact` source blocks as the
 only evidence for factual bidder claims and section citations. Do not use
 `bidder_positioning` or `quality_reference` to establish a bidder fact; they may
@@ -57,11 +58,14 @@ because its block appeared in the source inventory or a search result.
 
 ## Missing or conflicting evidence
 
-When the workspace lacks support for a required factual response, do not invent
-or soften it into an unsupported certainty. Write only what the evidence allows,
-record the gap through the complete assessment, and leave readiness to
-`reviewWorkspace`. If evidence conflicts, read every relevant block and do not
-choose a preferred version without representing the conflict in the assessment.
+Keep the total words in persisted section `content` at or below `maximumWords`
+when it is present. When evidence is missing or conflicts for a requirement, do
+not call `writeSection` for that requirement and do not create a placeholder or
+refusal section mapped to it. Record the gap through the complete assessment.
+Do not restate an unsupported positive claim, even under negation; describe the
+status generically in the final brief response. If evidence conflicts, read
+every relevant block and do not choose a preferred version without representing
+the conflict in the assessment.
 
 ## Review and completion
 

@@ -30,12 +30,13 @@ blocks with `readSourceBlocks` before assessing factual claims. Evidence searche
 and reads should be specific to the drafted statements and requirements rather
 than broad exploratory retrieval.
 
-Submit `recordEvidenceAssessment` with every current claim in `claims` and all
-known caller-identified gaps in `missingEvidence`. Each claim needs a unique
+Submit `recordEvidenceAssessment` with every current claim in `claims` and every
+genuine evidence gap in `missingEvidence`. This must include each mandatory
+requirement absent from persisted draft coverage. Each claim needs a unique
 `id`, its exact `text`, `sourceBlockIds`, and a valid status. Include only known
 source block IDs. Every `missingEvidence` entry needs a known `requirementId` and
-a concrete `reason`. The operation computes draft coverage gaps as well, so do
-not omit a known gap simply because a section exists.
+a concrete `reason`. A placeholder section is not safe failure: omit it rather
+than writing it (there is no delete tool).
 
 ## Source, block, and requirement validation
 

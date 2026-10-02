@@ -37,6 +37,7 @@ export type ResponsePlan = z.infer<typeof responsePlanSchema>;
 export const workspaceSchema = z.object({
   id: workspaceIdSchema,
   question: z.string().min(1),
+  maximumWords: z.number().int().positive().optional(),
   sourceDocuments: z.array(sourceDocumentSchema),
   sourceBlocks: z.array(sourceBlockSchema),
   requirements: z.array(requirementSchema),

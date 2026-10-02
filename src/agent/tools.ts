@@ -48,6 +48,8 @@ export interface WorkspaceReview {
   readiness: { canSubmit: boolean; reasons: string[] };
 }
 
+const words = (value: string): number => value.trim().split(/\s+/u).filter(Boolean).length;
+
 const tokenise = (value: string): Set<string> =>
   new Set(value.toLowerCase().split(/[^a-z0-9]+/u).filter(Boolean));
 
@@ -119,6 +121,7 @@ export function reviewWorkspaceState(workspace: Workspace): WorkspaceReview {
       : [];
   });
   const citedContentExists = (workspace.draft?.sections ?? []).some((section) => section.citations.length > 0);
+  const draftWordCount = words((workspace.draft?.sections ?? []).map((section) => section.content).join(" "));
   const reasons = [
     ...(workspace.draft?.sections.length ? [] : ["NO_DRAFT"]),
     ...(missingRequirementIds.length ? ["MISSING_REQUIREMENTS"] : []),
@@ -127,6 +130,7 @@ export function reviewWorkspaceState(workspace: Workspace): WorkspaceReview {
     ...(workspace.claims.some((claim) => claim.status !== "supported") ? ["NON_SUPPORTED_CLAIMS"] : []),
     ...(unresolvedConflictGroups.length ? ["UNRESOLVED_CONFLICTS"] : []),
     ...(workspace.warnings.length ? ["WARNINGS_PRESENT"] : []),
+    ...(workspace.maximumWords !== undefined && draftWordCount > workspace.maximumWords ? ["WORD_LIMIT_EXCEEDED"] : []),
   ];
   return {
     missingRequirementIds,

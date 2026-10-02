@@ -15,6 +15,7 @@ const MAX_AGENT_STEPS = 10;
 const workspaceSummary = (workspace: Workspace) => ({
   id: workspace.id,
   question: workspace.question,
+  maximumWords: workspace.maximumWords,
   requirements: workspace.requirements,
   sourceDocuments: workspace.sourceDocuments,
   sourceBlocks: workspace.sourceBlocks.map(({ id, documentId, locator }) => ({ id, documentId, locator })),
@@ -44,7 +45,7 @@ export function createTenderAgent({ model, service, workspaceId, skillCatalog }:
     model,
     instructions: [
       "Work only from the provided tender workspace tools.",
-      "Before task work, load the relevant approved skill.",
+      "Before task work, load both exact approved skills: tender-drafting and evidence-assessment.",
       "The persisted workspace is the final artifact; keep any final response brief.",
     ].join(" "),
     stopWhen: isStepCount(MAX_AGENT_STEPS),

@@ -198,4 +198,46 @@ describe("filesystem workspace tender tools", () => {
     });
     expect(after).toEqual(before);
   });
+
+  it("accepts draft content under a workspace word limit", async () => {
+    const { service, store, workspace } = await createService();
+    await store.save({
+      ...workspace,
+      maximumWords: 2,
+      draft: { id: "draft-sanitized-workspace", sections: [{
+        id: "complete", heading: "Ignored heading words", content: "One two", requirementIds: ["outcome", "security"], citations: [],
+      }] },
+    });
+
+    expect((await service.reviewWorkspace("sanitized-workspace")).readiness).toEqual({ canSubmit: true, reasons: [] });
+  });
+
+  it("reports an exceeded workspace word limit without mutating state", async () => {
+    const { service, store, workspace } = await createService();
+    await store.save({
+      ...workspace,
+      maximumWords: 1,
+      draft: { id: "draft-sanitized-workspace", sections: [{
+        id: "complete", heading: "Ignored heading words", content: "One two", requirementIds: ["outcome", "security"], citations: [],
+      }] },
+    });
+    const before = await store.load("sanitized-workspace");
+    const review = await service.reviewWorkspace("sanitized-workspace");
+    const after = await store.load("sanitized-workspace");
+
+    expect(review.readiness).toEqual({ canSubmit: false, reasons: ["WORD_LIMIT_EXCEEDED"] });
+    expect(after).toEqual(before);
+  });
+
+  it("does not apply a word limit when the workspace has none", async () => {
+    const { service, store, workspace } = await createService();
+    await store.save({
+      ...workspace,
+      draft: { id: "draft-sanitized-workspace", sections: [{
+        id: "complete", heading: "Ignored heading words", content: "One two", requirementIds: ["outcome", "security"], citations: [],
+      }] },
+    });
+
+    expect((await service.reviewWorkspace("sanitized-workspace")).readiness).toEqual({ canSubmit: true, reasons: [] });
+  });
 });

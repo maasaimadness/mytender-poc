@@ -26,6 +26,7 @@ export class TenderAgentCandidateAdapter implements CandidateAdapter {
       const workspace: Workspace = {
         id: TenderAgentCandidateAdapter.workspaceId,
         question: input.question,
+        ...(input.maximumWords === undefined ? {} : { maximumWords: input.maximumWords }),
         sourceDocuments: input.sourceDocuments,
         sourceBlocks: input.evidenceBlocks,
         requirements: input.requirements,
