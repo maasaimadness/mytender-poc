@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { MockLanguageModelV4 } from "ai/test";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { FileAgentSkillCatalog, FileWorkspaceStore, runTenderAgent, TenderToolService, type AgentTraceEvent, type Workspace } from "../../src/agent/index.js";
+import { FileAgentSkillCatalog, FileWorkspaceStore, runTenderAgent, TenderToolService, type AgentTraceEvent, type RunMemoryRecord, type Workspace } from "../../src/agent/index.js";
 
 const temporaryRoots: string[] = [];
 const usage = {
@@ -16,20 +16,24 @@ afterEach(async () => {
   await Promise.all(temporaryRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-async function createService(question = "Summarise the delivery outcome."): Promise<{ service: TenderToolService; workspaceId: string; skillCatalog: FileAgentSkillCatalog }> {
+async function createService(question = "Summarise the delivery outcome.", ready = false): Promise<{ service: TenderToolService; workspaceId: string; skillCatalog: FileAgentSkillCatalog }> {
   const root = await mkdtemp(join(tmpdir(), "mytender-agent-loop-"));
   temporaryRoots.push(root);
   const store = new FileWorkspaceStore(root);
   const workspace: Workspace = {
     id: "trusted-workspace",
     question,
-    sourceDocuments: [],
-    sourceBlocks: [],
+    sourceDocuments: ready ? [{ id: "bidder-doc", role: "bidder_fact", title: "Bidder evidence" }] : [],
+    sourceBlocks: ready ? [{ id: "block-1", documentId: "bidder-doc", locator: "p1", text: "Evidence." }] : [],
     requirements: [{ id: "outcome", text: "Describe the outcome", mandatory: true }],
+    ...(ready ? {
+      plan: { sections: [{ id: "outcome", heading: "Outcome", requirementIds: ["outcome"] }] },
+      draft: { id: "draft-trusted-workspace", sections: [{ id: "outcome", heading: "Outcome", content: "Evidence-backed outcome.", requirementIds: ["outcome"], citations: [{ sourceBlockId: "block-1" }] }] },
+    } : {}),
     warnings: [],
     missingEvidence: [],
-    claims: [],
-    retrievedBlockIds: [],
+    claims: ready ? [{ id: "claim-1", text: "Outcome", sourceBlockIds: ["block-1"], status: "supported" }] : [],
+    retrievedBlockIds: ready ? ["block-1"] : [],
     events: [],
     conflictingEvidenceGroups: [],
   };
@@ -158,6 +162,43 @@ describe("tender tool loop", () => {
     expect(events.map(({ type }) => type)).toEqual(["run_started", "run_failed"]);
     expect(events.at(-1)).toMatchObject({ type: "run_failed", failureCode: "agent_run_failed" });
     expect(JSON.stringify(events)).not.toContain("ERROR_SECRET");
+  });
+
+  it("records blocked and failed redacted run memory", async () => {
+    const { service, workspaceId, skillCatalog } = await createService("EVIDENCE_SENTINEL");
+    const records: RunMemoryRecord[] = [];
+    const blockedModel = new MockLanguageModelV4({ doGenerate: [{ content: [{ type: "text", text: "DRAFT_SENTINEL" }], finishReason: { unified: "stop", raw: undefined }, usage, warnings: [] }] });
+    await runTenderAgent({ model: blockedModel, service, workspaceId, skillCatalog, prompt: "PROMPT_SENTINEL", memoryStore: { record: async (record) => { records.push(record); } } });
+    expect(records[0]).toMatchObject({ outcome: "blocked", nextActionCode: "add_evidence", missingRequirementIds: ["outcome"] });
+    const failedModel = new MockLanguageModelV4({ doGenerate: async () => { throw new Error("ERROR_SENTINEL"); } });
+    await expect(runTenderAgent({ model: failedModel, service, workspaceId, skillCatalog, prompt: "PROMPT_SENTINEL", memoryStore: { record: async (record) => { records.push(record); } } })).rejects.toThrow("ERROR_SENTINEL");
+    expect(records.at(-1)).toMatchObject({ outcome: "failed", failureCode: "agent_run_failed" });
+    expect(JSON.stringify(records)).not.toContain("PROMPT_SENTINEL");
+    expect(JSON.stringify(records)).not.toContain("EVIDENCE_SENTINEL");
+    expect(JSON.stringify(records)).not.toContain("DRAFT_SENTINEL");
+    expect(JSON.stringify(records)).not.toContain("ERROR_SENTINEL");
+  });
+
+  it("records completed memory when deterministic review permits submission", async () => {
+    const { service, workspaceId, skillCatalog } = await createService(undefined, true);
+    const records: RunMemoryRecord[] = [];
+    const model = new MockLanguageModelV4({ doGenerate: [{ content: [{ type: "text", text: "Saved." }], finishReason: { unified: "stop", raw: undefined }, usage, warnings: [] }] });
+    await runTenderAgent({ model, service, workspaceId, skillCatalog, prompt: "PROMPT_SENTINEL", memoryStore: { record: async (record) => { records.push(record); } } });
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ outcome: "completed", nextActionCode: "none", claimStatuses: [{ id: "claim-1", status: "supported" }] });
+  });
+
+  it("surfaces successful-run memory persistence failures", async () => {
+    const { service, workspaceId, skillCatalog } = await createService();
+    const model = new MockLanguageModelV4({ doGenerate: [{ content: [{ type: "text", text: "Saved." }], finishReason: { unified: "stop", raw: undefined }, usage, warnings: [] }] });
+    await expect(runTenderAgent({
+      model,
+      service,
+      workspaceId,
+      skillCatalog,
+      prompt: "Prompt.",
+      memoryStore: { record: async () => { throw new Error("MEMORY_PERSISTENCE_ERROR"); } },
+    })).rejects.toThrow("MEMORY_PERSISTENCE_ERROR");
   });
 });
 

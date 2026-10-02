@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { draftSectionSchema, sourceRoleSchema } from "../domain/index.js";
 import { agentSkillIdSchema, type AgentSkillCatalog } from "./skills.js";
+import type { RunMemoryRecord, RunMemoryStore } from "./memory.js";
 import type { AgentTraceEvent, AgentTraceEventInput, AgentTraceSink } from "./tracing.js";
 import { evidenceAssessmentSchema, TenderToolService } from "./tools.js";
 import { responsePlanSchema, type Workspace } from "./workspace.js";
@@ -113,9 +114,10 @@ export function createTenderAgent({ model, service, workspaceId, skillCatalog }:
 export interface RunTenderAgentOptions extends CreateTenderAgentOptions {
   prompt: string;
   traceSink?: AgentTraceSink;
+  memoryStore?: RunMemoryStore;
 }
 
-export async function runTenderAgent({ model, service, workspaceId, skillCatalog, prompt, traceSink }: RunTenderAgentOptions): Promise<{
+export async function runTenderAgent({ model, service, workspaceId, skillCatalog, prompt, traceSink, memoryStore }: RunTenderAgentOptions): Promise<{
   workspace: Workspace;
   text: string;
   runId: string;
@@ -136,6 +138,13 @@ export async function runTenderAgent({ model, service, workspaceId, skillCatalog
       onStepEnd: async (step) => writeTrace(stepTraceEvent(step)),
     });
   } catch (error) {
+    if (memoryStore !== undefined) {
+      try {
+        await memoryStore.record(failedMemoryRecord(runId, workspaceId));
+      } catch {
+        // Preserve the original agent error when memory persistence also fails.
+      }
+    }
     try {
       await writeTrace({ type: "run_failed", failureCode: "agent_run_failed", durationMs: elapsedMs(startedAt) });
     } catch {
@@ -144,7 +153,57 @@ export async function runTenderAgent({ model, service, workspaceId, skillCatalog
     throw error;
   }
   await writeTrace({ type: "run_completed", durationMs: elapsedMs(startedAt) });
-  return { workspace: await service.inspectWorkspace(workspaceId), text: result.text, runId };
+  const workspace = await service.inspectWorkspace(workspaceId);
+  if (memoryStore !== undefined) await memoryStore.record(completedMemoryRecord(runId, workspace, await service.reviewWorkspace(workspaceId)));
+  return { workspace, text: result.text, runId };
+}
+
+function completedMemoryRecord(runId: string, workspace: Workspace, review: Awaited<ReturnType<TenderToolService["reviewWorkspace"]>>): RunMemoryRecord {
+  return {
+    schemaVersion: "v1",
+    id: runId,
+    recordedAt: new Date().toISOString(),
+    source: "agent-run",
+    runId,
+    workspaceId: workspace.id,
+    outcome: review.readiness.canSubmit ? "completed" : "blocked",
+    failedChecks: [...new Set([
+      ...review.readiness.reasons,
+      ...review.citationIssues.map((issue) => issue.code),
+      ...review.claimIssues.map((issue) => issue.code),
+      ...review.unresolvedConflictGroups,
+    ])],
+    warningCodes: [...new Set(review.warningCodes)],
+    missingRequirementIds: [...new Set(review.missingRequirementIds)],
+    claimStatuses: workspace.claims.map((claim) => ({ id: claim.id, status: claim.status })),
+    retrievedBlockIds: [...new Set(workspace.retrievedBlockIds)],
+    nextActionCode: review.readiness.canSubmit
+      ? "none"
+      : review.unresolvedConflictGroups.length > 0 || workspace.claims.some((claim) => claim.status === "conflicting")
+        ? "resolve_conflict"
+        : review.missingRequirementIds.length > 0 || review.citationIssues.length > 0 || workspace.claims.some((claim) => claim.status !== "supported")
+          ? "add_evidence"
+          : "improve_tool_use",
+  };
+}
+
+function failedMemoryRecord(runId: string, workspaceId: string): RunMemoryRecord {
+  return {
+    schemaVersion: "v1",
+    id: runId,
+    recordedAt: new Date().toISOString(),
+    source: "agent-run",
+    runId,
+    workspaceId,
+    outcome: "failed",
+    failureCode: "agent_run_failed",
+    failedChecks: [],
+    warningCodes: [],
+    missingRequirementIds: [],
+    claimStatuses: [],
+    retrievedBlockIds: [],
+    nextActionCode: "improve_tool_use",
+  };
 }
 
 function stepTraceEvent(step: GenerateTextStepEndEvent): AgentTraceEventInput {

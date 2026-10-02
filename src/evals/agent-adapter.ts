@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { LanguageModel } from "ai";
 
-import { FileWorkspaceStore, runTenderAgent, TenderToolService, type AgentSkillCatalog, type AgentTraceSink, type Workspace } from "../agent/index.js";
+import { FileWorkspaceStore, runTenderAgent, TenderToolService, type AgentSkillCatalog, type AgentTraceSink, type RunMemoryStore, type Workspace } from "../agent/index.js";
 import type { CandidateAdapter } from "./adapters.js";
 import type { EvaluationInput } from "./schemas.js";
 
@@ -16,6 +16,7 @@ export class TenderAgentCandidateAdapter implements CandidateAdapter {
     private readonly model: LanguageModel,
     private readonly skillCatalog: AgentSkillCatalog,
     private readonly traceSink?: AgentTraceSink,
+    private readonly memoryStore?: RunMemoryStore,
   ) {}
 
   async generate(input: EvaluationInput): Promise<unknown> {
@@ -45,6 +46,7 @@ export class TenderAgentCandidateAdapter implements CandidateAdapter {
         skillCatalog: this.skillCatalog,
         prompt: "Draft a concise response addressing every workspace requirement using cited bidder evidence.",
         ...(this.traceSink === undefined ? {} : { traceSink: this.traceSink }),
+        ...(this.memoryStore === undefined ? {} : { memoryStore: this.memoryStore }),
       });
 
       return {
