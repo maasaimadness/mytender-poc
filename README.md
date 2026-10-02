@@ -6,18 +6,22 @@ bidder evidence, and persists cited draft sections one at a time.
 ## Current state
 
 The repository contains a bounded AI SDK tool loop, filesystem-backed workspace,
-deterministic tender tools, OpenRouter model configuration, and an evaluation
-runner. There is no interface yet.
+deterministic tender tools, repository-owned skills, redacted observability,
+OpenRouter model configuration, and an evaluation runner. There is no interface
+yet.
 
 ## How it works
 
 1. A validated JSON workspace holds requirements, source blocks, plan, draft,
    retrieval history, warnings, and claims.
 2. Deterministic tools inspect that state, search and read evidence, write a plan,
-   and replace one draft section.
-3. A bounded model loop chooses those tools. The workspace—not the final chat
+   replace one draft section, persist an evidence assessment, and calculate
+   submission readiness.
+3. The agent loads two allow-listed Markdown skills on demand; the stable system
+   prompt contains only the core safety policy.
+4. A bounded model loop chooses those tools. The workspace—not the final chat
    message—is the output.
-4. The same agent is a candidate in the evaluation runner; a separate judge
+5. The same agent is a candidate in the evaluation runner; a separate judge
    adapter invocation evaluates only the semantic rubric after deterministic
    checks pass.
 
@@ -62,11 +66,11 @@ The candidate and judge are separate adapters backed by the same configured mode
 
 ## Live evaluation
 
-Set credentials in the environment, never in the repository:
+Copy `.env.example` to the ignored `.env` file and add a fresh key, or export the
+same values in your shell. Never commit credentials:
 
 ```bash
-export OPENROUTER_API_KEY=...
-export OPENROUTER_MODEL=provider/model
+cp .env.example .env
 npm run eval:live
 ```
 
@@ -74,11 +78,21 @@ The live runner uses separate candidate and judge adapters and defaults to three
 runs per fixture. For a fast first baseline, use
 `EVAL_REPEATS=1 npm run eval:live`.
 
-The current agent should handle the clean grounded-answer case. The missing case
-study and contradictory-security scenarios are intentionally the next red bar:
-the workspace models warnings, gaps, and conflicting claims, but the model does
-not yet have a tool that can persist them. Deterministic preflight should stop
-those outputs before the semantic judge.
+The agent can persist evidence gaps and conflicting claims. Live evaluation asks
+whether the model reliably chooses those tools in clean, incomplete, and
+contradictory scenarios. Deterministic preflight stops unsafe outputs before the
+semantic judge even if model behavior varies.
+
+Live runs append two local, ignored sidecars under `eval-results/`:
+
+- `live-trace.jsonl` contains run/step metadata such as tool names, token counts,
+  timings, and fixed outcome codes;
+- `live-memory.jsonl` contains structured completed, blocked, and failed outcomes
+  plus stable next-action codes.
+
+Both writers validate strict allow-listed schemas. They exclude prompts, source
+text, drafts, tool inputs and outputs, provider bodies, raw errors, credentials,
+and chain-of-thought.
 
 ## Data safety
 
@@ -97,14 +111,15 @@ tests/evals/         Evaluation harness tests
 
 ## With more time
 
-The next block would add one deterministic tool for recording evidence gaps,
-conflicts, and claim status, then use the red live fixtures to drive it green.
-After that: a minimal question/document interface with section-level feedback,
-real document ingestion, and resumable runs for long bids.
+Add a minimal question/document interface with section-level feedback, real
+document ingestion, and resumable runs for long bids. Then use repeated live
+evaluations to tune tool-selection reliability without weakening deterministic
+submission gates.
 
-## Observability phase contract
+## Observability boundaries
 
-This phase adds four small blocks:
+Four small mechanisms cover the production concerns without introducing a
+framework:
 
 1. Persist a complete evidence assessment and compute submission readiness.
 2. Load allow-listed repository skills instead of expanding the system prompt.
@@ -116,5 +131,6 @@ metadata only. Run memory contains distilled outcomes and next-action codes.
 None of these files may contain prompts, evidence text, drafts, tool arguments,
 tool results, provider bodies, credentials, or chain-of-thought.
 
-Each block must pass `npm test`, `npm run typecheck`, and `npm run eval:smoke`.
-Live evaluation remains blocked until a replacement OpenRouter key is available.
+The JSON workspace is product state; workspace events are its mutation history.
+Trace and memory files are operational sidecars, not inputs automatically replayed
+into future prompts. Live evaluation requires a fresh OpenRouter key.

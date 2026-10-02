@@ -8,7 +8,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "eval:smoke": "node --import tsx src/evals/cli.ts",
-    "eval:live": "node --import tsx src/evals/live-cli.ts"
+    "eval:live": "node --env-file-if-exists=.env --import tsx src/evals/live-cli.ts"
   },
   "dependencies": {
     "@openrouter/ai-sdk-provider": "^3.1.0",
