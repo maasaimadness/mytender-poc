@@ -106,6 +106,21 @@ Both writers validate strict allow-listed schemas. They exclude prompts, source
 text, drafts, tool inputs and outputs, provider bodies, raw errors, credentials,
 and chain-of-thought.
 
+### Latest live evidence
+
+On 2 October 2026, `anthropic/claude-sonnet-5.5` completed three runs of each
+fixture. All nine outputs passed deterministic preflight and reached the judge.
+
+| Scenario | Judged | Semantic mean | Worst | Groundedness mean |
+| --- | ---: | ---: | ---: | ---: |
+| Customer outcomes | 3/3 | 4.67 | 4 | 5.00 |
+| Conflicting security evidence | 3/3 | 3.17 | 1 | 4.67 |
+| Missing third case study | 3/3 | 3.67 | 3 | 5.00 |
+
+The incomplete and conflicting scenarios intentionally lose coverage points:
+the safe behavior is to expose the gap instead of inventing a complete answer.
+Generated reports and redacted JSONL sidecars remain local and ignored by Git.
+
 ## Data safety
 
 The supplied tender pack is excluded from Git because it contains confidential and personal information. Committed fixtures contain small, sanitized examples only.
