@@ -8,6 +8,25 @@ The agent will plan a response, retrieve approved evidence, draft one section at
 
 This repository currently contains the test and evaluation foundation. The product agent and interface are the next stage.
 
+## Agent build plan
+
+The agent will be added in four small blocks:
+
+1. Add persistent workspace state and deterministic tender tools.
+2. Add a bounded AI SDK tool loop with a mocked-model integration test.
+3. Add OpenRouter configuration and credential-safe failure handling.
+4. Connect the agent to the evaluation runner and record the first live results.
+
+After each block, run:
+
+```bash
+npm test
+npm run typecheck
+npm run eval:smoke
+```
+
+The original tender pack stays outside Git. Tests use sanitized fixtures and temporary workspaces. Each block is a separate commit and can be reverted independently.
+
 ## Run the checks
 
 ```bash
