@@ -66,6 +66,11 @@ Deterministic code checks facts that do not need model judgement:
 - word limits;
 - report integrity.
 
+The workspace carries any response word limit into the agent and deterministic
+readiness review. A persisted section mapped to a requirement counts as coverage.
+If evidence is insufficient, the agent must leave that requirement undrafted and
+record it in `missingEvidence` instead of writing a placeholder refusal section.
+
 A semantic judge scores semantic groundedness, tailoring, scoreability, and writing quality.
 
 The candidate and judge are separate adapters backed by the same configured model instance. The candidate never receives fixture answer keys. The judge runs only after deterministic checks pass. Deterministic validation checks declared claim/source relationships; semantic groundedness remains judge-scored.
