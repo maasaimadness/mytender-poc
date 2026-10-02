@@ -29,6 +29,12 @@ Every tool is closed over one trusted workspace ID. The model cannot select a
 different workspace or use buyer requirements and marketing copy as evidence
 for bidder facts.
 
+Repository skills use the native `skills/<skill-id>/SKILL.md` shape. Each file
+has YAML frontmatter with a matching `name` and a concise `description`, followed
+by the domain workflow, safety invariants, and completion criteria. The loader
+accepts only known skill IDs, validates the metadata and size, and returns the
+instruction body to the model.
+
 ## Setup and checks
 
 ```bash
