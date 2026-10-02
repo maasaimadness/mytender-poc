@@ -56,6 +56,29 @@ sanitized fixtures and temporary workspaces.
 
 Generated reports are written to `eval-results/` and are not committed.
 
+## Demo CLI
+
+The demo proves the required user loop without a separate web application. A
+user enters a tender question and optional word limit. The CLI runs the real
+agent against a small sanitized bidder evidence pack, then prints the persisted
+draft, citations, evidence gaps, warnings, and deterministic readiness result.
+
+```bash
+npm run demo
+
+# Reproducible call rehearsal without interactive prompts
+npm run demo -- --question "Describe two measurable customer outcomes." --max-words 120
+```
+
+Each run writes its workspace plus redacted trace and memory sidecars under the
+ignored `tmp/demo/` directory. The CLI must treat a blocked answer as a valid
+safe outcome and show its reasons. Configuration, provider, and unexpected
+runtime errors must still exit non-zero.
+
+This surface intentionally excludes uploads, general document parsing, user
+accounts, and browser UI. Verify it with `npm test`, `npm run typecheck`,
+`npm run eval:smoke`, and one live non-interactive demo command.
+
 ## Evaluation boundary
 
 Deterministic code checks facts that do not need model judgement:
