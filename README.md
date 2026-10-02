@@ -78,9 +78,15 @@ ignored `tmp/demo/` directory. The CLI must treat a blocked answer as a valid
 safe outcome and show its reasons. Configuration, provider, and unexpected
 runtime errors must still exit non-zero.
 
-The watch command waits for the newest demo run and prints only allow-listed
-operational fields. It never prints prompts, evidence text, draft text, tool
-arguments or results, provider bodies, raw errors, credentials, or reasoning.
+The watch command waits for the next demo run created after it starts. Use
+`npm run demo:watch -- --latest` to replay the newest existing run. It prints
+only allow-listed operational fields. It never prints prompts, evidence text,
+draft text, tool arguments or results, provider bodies, raw errors,
+credentials, or reasoning.
+
+The primary CLI prints coarse step progress. Its result maps persisted claims
+to source block IDs. A blocked result includes one concrete next action, while
+configuration and runtime failures remain sanitized and actionable.
 
 This surface intentionally excludes uploads, general document parsing, user
 accounts, and browser UI. Verify it with `npm test`, `npm run typecheck`,
