@@ -66,6 +66,9 @@ draft, citations, evidence gaps, warnings, and deterministic readiness result.
 ```bash
 npm run demo
 
+# In a second terminal, follow redacted trace and memory events
+npm run demo:watch
+
 # Reproducible call rehearsal without interactive prompts
 npm run demo -- --question "Describe two measurable customer outcomes." --max-words 120
 ```
@@ -74,6 +77,10 @@ Each run writes its workspace plus redacted trace and memory sidecars under the
 ignored `tmp/demo/` directory. The CLI must treat a blocked answer as a valid
 safe outcome and show its reasons. Configuration, provider, and unexpected
 runtime errors must still exit non-zero.
+
+The watch command waits for the newest demo run and prints only allow-listed
+operational fields. It never prints prompts, evidence text, draft text, tool
+arguments or results, provider bodies, raw errors, credentials, or reasoning.
 
 This surface intentionally excludes uploads, general document parsing, user
 accounts, and browser UI. Verify it with `npm test`, `npm run typecheck`,
