@@ -1,8 +1,10 @@
-import { ToolLoopAgent, isStepCount, tool, type LanguageModel } from "ai";
+import { randomUUID } from "node:crypto";
+import { ToolLoopAgent, isStepCount, tool, type GenerateTextStepEndEvent, type LanguageModel } from "ai";
 import { z } from "zod";
 
 import { draftSectionSchema, sourceRoleSchema } from "../domain/index.js";
 import { agentSkillIdSchema, type AgentSkillCatalog } from "./skills.js";
+import type { AgentTraceEvent, AgentTraceEventInput, AgentTraceSink } from "./tracing.js";
 import { evidenceAssessmentSchema, TenderToolService } from "./tools.js";
 import { responsePlanSchema, type Workspace } from "./workspace.js";
 
@@ -110,12 +112,67 @@ export function createTenderAgent({ model, service, workspaceId, skillCatalog }:
 
 export interface RunTenderAgentOptions extends CreateTenderAgentOptions {
   prompt: string;
+  traceSink?: AgentTraceSink;
 }
 
-export async function runTenderAgent({ model, service, workspaceId, skillCatalog, prompt }: RunTenderAgentOptions): Promise<{
+export async function runTenderAgent({ model, service, workspaceId, skillCatalog, prompt, traceSink }: RunTenderAgentOptions): Promise<{
   workspace: Workspace;
   text: string;
+  runId: string;
 }> {
-  const result = await createTenderAgent({ model, service, workspaceId, skillCatalog }).generate({ prompt });
-  return { workspace: await service.inspectWorkspace(workspaceId), text: result.text };
+  const runId = randomUUID();
+  const startedAt = Date.now();
+  let seq = 0;
+  const writeTrace = async (event: AgentTraceEventInput) => {
+    if (traceSink === undefined) return;
+    await traceSink.write({ ...event, schemaVersion: "v1", runId, workspaceId, seq: seq++, timestamp: new Date().toISOString() } as AgentTraceEvent);
+  };
+
+  await writeTrace({ type: "run_started" });
+  let result;
+  try {
+    result = await createTenderAgent({ model, service, workspaceId, skillCatalog }).generate({
+      prompt,
+      onStepEnd: async (step) => writeTrace(stepTraceEvent(step)),
+    });
+  } catch (error) {
+    try {
+      await writeTrace({ type: "run_failed", failureCode: "agent_run_failed", durationMs: elapsedMs(startedAt) });
+    } catch {
+      // Preserve the agent failure when trace persistence also fails.
+    }
+    throw error;
+  }
+  await writeTrace({ type: "run_completed", durationMs: elapsedMs(startedAt) });
+  return { workspace: await service.inspectWorkspace(workspaceId), text: result.text, runId };
+}
+
+function stepTraceEvent(step: GenerateTextStepEndEvent): AgentTraceEventInput {
+  const stepTimeMs = finiteOrUndefined(step.performance.stepTimeMs);
+  const responseTimeMs = finiteOrUndefined(step.performance.responseTimeMs);
+  return {
+    type: "step_completed",
+    stepNumber: step.stepNumber,
+    providerId: step.model.provider,
+    modelId: step.model.modelId,
+    finishReason: step.finishReason,
+    toolNames: [...new Set(step.toolCalls.map(({ toolName }) => toolName))],
+    inputTokens: finiteOrNull(step.usage.inputTokens),
+    outputTokens: finiteOrNull(step.usage.outputTokens),
+    totalTokens: finiteOrNull(step.usage.totalTokens),
+    ...(stepTimeMs === undefined ? {} : { stepTimeMs }),
+    ...(responseTimeMs === undefined ? {} : { responseTimeMs }),
+  };
+}
+
+function finiteOrNull(value: number | undefined): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function finiteOrUndefined(value: number | undefined): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function elapsedMs(startedAt: number): number {
+  return Math.max(0, Date.now() - startedAt);
 }

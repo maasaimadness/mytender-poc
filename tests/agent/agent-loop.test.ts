@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { MockLanguageModelV4 } from "ai/test";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { FileAgentSkillCatalog, FileWorkspaceStore, runTenderAgent, TenderToolService, type Workspace } from "../../src/agent/index.js";
+import { FileAgentSkillCatalog, FileWorkspaceStore, runTenderAgent, TenderToolService, type AgentTraceEvent, type Workspace } from "../../src/agent/index.js";
 
 const temporaryRoots: string[] = [];
 const usage = {
@@ -16,13 +16,13 @@ afterEach(async () => {
   await Promise.all(temporaryRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-async function createService(): Promise<{ service: TenderToolService; workspaceId: string; skillCatalog: FileAgentSkillCatalog }> {
+async function createService(question = "Summarise the delivery outcome."): Promise<{ service: TenderToolService; workspaceId: string; skillCatalog: FileAgentSkillCatalog }> {
   const root = await mkdtemp(join(tmpdir(), "mytender-agent-loop-"));
   temporaryRoots.push(root);
   const store = new FileWorkspaceStore(root);
   const workspace: Workspace = {
     id: "trusted-workspace",
-    question: "Summarise the delivery outcome.",
+    question,
     sourceDocuments: [],
     sourceBlocks: [],
     requirements: [{ id: "outcome", text: "Describe the outcome", mandatory: true }],
@@ -100,4 +100,69 @@ describe("tender tool loop", () => {
     await expect(skillCatalog.load(workspaceId)).rejects.toThrow();
     await expect(skillCatalog.load("../../tender-drafting")).rejects.toThrow();
   });
+
+  it("writes redacted start, step, and completion metadata in sequence", async () => {
+    const { service, workspaceId, skillCatalog } = await createService("SOURCE_SECRET");
+    const events: AgentTraceEvent[] = [];
+    const model = new MockLanguageModelV4({
+      doGenerate: [
+        {
+          content: [{
+            type: "tool-call",
+            toolCallId: "call-1",
+            toolName: "writePlan",
+            input: JSON.stringify({ plan: { sections: [{ id: "outcome", heading: "DRAFT_SECRET", requirementIds: ["outcome"] }] } }),
+          }],
+          finishReason: { unified: "tool-calls", raw: undefined },
+          usage,
+          warnings: [],
+        },
+        { content: [{ type: "text", text: "MODEL_SECRET" }], finishReason: { unified: "stop", raw: undefined }, usage, warnings: [] },
+      ],
+    });
+
+    const result = await runTenderAgent({
+      model,
+      service,
+      workspaceId,
+      skillCatalog,
+      prompt: "PROMPT_SECRET",
+      traceSink: { write: async (event) => { events.push(event); } },
+    });
+
+    expect(result.runId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(events.map(({ type }) => type)).toEqual(["run_started", "step_completed", "step_completed", "run_completed"]);
+    expect(events.map(({ seq }) => seq)).toEqual([0, 1, 2, 3]);
+    expect(events.filter((event) => event.type === "step_completed").map((event) => event.toolNames)).toEqual([["writePlan"], []]);
+    const serialized = JSON.stringify(events);
+    for (const secret of ["PROMPT_SECRET", "SOURCE_SECRET", "DRAFT_SECRET", "MODEL_SECRET"]) expect(serialized).not.toContain(secret);
+    expect(allKeys(events)).not.toEqual(expect.arrayContaining(["prompt", "content", "input", "output", "result", "body", "headers", "errorMessage"]));
+  });
+
+  it("records a fixed failure code without serializing an agent error", async () => {
+    const { service, workspaceId, skillCatalog } = await createService();
+    const events: AgentTraceEvent[] = [];
+    const model = new MockLanguageModelV4({
+      doGenerate: async () => { throw new Error("ERROR_SECRET"); },
+    });
+
+    await expect(runTenderAgent({
+      model,
+      service,
+      workspaceId,
+      skillCatalog,
+      prompt: "PROMPT_SECRET",
+      traceSink: { write: async (event) => { events.push(event); } },
+    })).rejects.toThrow("ERROR_SECRET");
+
+    expect(events.map(({ type }) => type)).toEqual(["run_started", "run_failed"]);
+    expect(events.at(-1)).toMatchObject({ type: "run_failed", failureCode: "agent_run_failed" });
+    expect(JSON.stringify(events)).not.toContain("ERROR_SECRET");
+  });
 });
+
+function allKeys(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(allKeys);
+  if (typeof value !== "object" || value === null) return [];
+  return Object.entries(value).flatMap(([key, nested]) => [key, ...allKeys(nested)]);
+}
