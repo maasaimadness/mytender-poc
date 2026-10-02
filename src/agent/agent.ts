@@ -2,7 +2,7 @@ import { ToolLoopAgent, isStepCount, tool, type LanguageModel } from "ai";
 import { z } from "zod";
 
 import { draftSectionSchema, sourceRoleSchema } from "../domain/index.js";
-import { TenderToolService } from "./tools.js";
+import { evidenceAssessmentSchema, TenderToolService } from "./tools.js";
 import { responsePlanSchema, type Workspace } from "./workspace.js";
 
 /** A small bound keeps one tender-writing turn finite while allowing a useful plan-and-draft sequence. */
@@ -22,6 +22,7 @@ const workspaceSummary = (workspace: Workspace) => ({
 
 const planInputSchema = z.object({ plan: responsePlanSchema });
 const sectionInputSchema = z.object({ section: draftSectionSchema });
+const assessmentInputSchema = z.object({ assessment: evidenceAssessmentSchema });
 
 export interface CreateTenderAgentOptions {
   model: LanguageModel;
@@ -42,6 +43,7 @@ export function createTenderAgent({ model, service, workspaceId }: CreateTenderA
       "Write a plan before drafting, then write each section separately.",
       "For factual claims, retrieve bidder_fact evidence, read its source blocks, and cite their block IDs.",
       "Never invent facts or missing evidence; preserve gaps as missing evidence.",
+      "Before finishing, record the complete evidence assessment and review workspace readiness.",
       "The persisted workspace is the final artifact; keep any final response brief.",
     ].join(" "),
     stopWhen: isStepCount(MAX_AGENT_STEPS),
@@ -85,6 +87,19 @@ export function createTenderAgent({ model, service, workspaceId }: CreateTenderA
           const workspace = await service.writeSection(workspaceId, section);
           return { draft: workspace.draft };
         },
+      }),
+      recordEvidenceAssessment: tool({
+        description: "Replace the complete claim and missing-evidence assessment after drafting.",
+        inputSchema: assessmentInputSchema,
+        execute: async ({ assessment }) => {
+          const workspace = await service.recordEvidenceAssessment(workspaceId, assessment);
+          return { claims: workspace.claims, missingEvidence: workspace.missingEvidence, warnings: workspace.warnings };
+        },
+      }),
+      reviewWorkspace: tool({
+        description: "Review deterministic submission readiness without changing the workspace.",
+        inputSchema: z.object({}),
+        execute: async () => service.reviewWorkspace(workspaceId),
       }),
     },
   });

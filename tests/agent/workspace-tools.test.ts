@@ -137,4 +137,65 @@ describe("filesystem workspace tender tools", () => {
       citations: [{ sourceBlockId: "buyer-alpha" }],
     })).rejects.toThrow("bidder_fact evidence: buyer-alpha");
   });
+
+  it("downgrades unsafe supported claims and derives deduplicated gaps and warnings", async () => {
+    const { service } = await createService();
+    const updated = await service.recordEvidenceAssessment("sanitized-workspace", {
+      claims: [{ id: "unsafe", text: "Unsupported", sourceBlockIds: [], status: "supported" }],
+      missingEvidence: [
+        { requirementId: "outcome", reason: "Caller outcome gap." },
+        { requirementId: "outcome", reason: "Latest caller outcome gap." },
+      ],
+    });
+
+    expect(updated.claims).toEqual([{ id: "unsafe", text: "Unsupported", sourceBlockIds: [], status: "unverified" }]);
+    expect(updated.missingEvidence).toEqual([
+      { requirementId: "outcome", reason: "Latest caller outcome gap." },
+      { requirementId: "security", reason: "No draft section addresses this requirement." },
+    ]);
+    expect(updated.warnings.map((warning) => warning.code)).toEqual(["INSUFFICIENT_EVIDENCE"]);
+    expect(updated.events.at(-1)?.type).toBe("evidence_assessment_recorded");
+  });
+
+  it("records a known conflict only when every group block is cited", async () => {
+    const { service, store, workspace } = await createService();
+    await store.save({ ...workspace, conflictingEvidenceGroups: [["fact-alpha", "fact-beta"]] });
+
+    await expect(service.recordEvidenceAssessment("sanitized-workspace", {
+      claims: [{ id: "partial", text: "Partial conflict", sourceBlockIds: ["fact-alpha"], status: "conflicting" }],
+    })).rejects.toThrow("every block in a known conflict group");
+    const updated = await service.recordEvidenceAssessment("sanitized-workspace", {
+      claims: [{ id: "complete", text: "Complete conflict", sourceBlockIds: ["fact-alpha", "fact-beta"], status: "supported" }],
+    });
+    expect(updated.claims[0]?.status).toBe("conflicting");
+  });
+
+  it("reviews a clean supported assessment as submit-ready without mutating state", async () => {
+    const { service, store } = await createService();
+    await service.writePlan("sanitized-workspace", {
+      sections: [
+        { id: "outcomes", heading: "Outcomes", requirementIds: ["outcome"] },
+        { id: "security", heading: "Security", requirementIds: ["security"] },
+      ],
+    });
+    await service.writeSection("sanitized-workspace", {
+      id: "outcomes", heading: "Outcomes", content: "Outcome.", requirementIds: ["outcome"], citations: [{ sourceBlockId: "fact-alpha" }],
+    });
+    await service.writeSection("sanitized-workspace", {
+      id: "security", heading: "Security", content: "Security.", requirementIds: ["security"], citations: [{ sourceBlockId: "fact-beta" }],
+    });
+    await service.readSourceBlocks("sanitized-workspace", ["fact-alpha", "fact-beta"]);
+    await service.recordEvidenceAssessment("sanitized-workspace", {
+      claims: [{ id: "outcome-claim", text: "Outcome", sourceBlockIds: ["fact-alpha"], status: "supported" }],
+    });
+    const before = await store.load("sanitized-workspace");
+    const review = await service.reviewWorkspace("sanitized-workspace");
+    const after = await store.load("sanitized-workspace");
+
+    expect(review).toEqual({
+      missingRequirementIds: [], citationIssues: [], claimIssues: [], unresolvedConflictGroups: [], warningCodes: [],
+      readiness: { canSubmit: true, reasons: [] },
+    });
+    expect(after).toEqual(before);
+  });
 });
