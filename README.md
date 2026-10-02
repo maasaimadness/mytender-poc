@@ -27,7 +27,8 @@ yet.
 
 Every tool is closed over one trusted workspace ID. The model cannot select a
 different workspace or use buyer requirements and marketing copy as evidence
-for bidder facts.
+for bidder facts. The tool service serializes workspace operations, so parallel
+tool calls cannot overwrite each other's persisted state or review stale state.
 
 Repository skills use the native `skills/<skill-id>/SKILL.md` shape. Each file
 has YAML frontmatter with a matching `name` and a concise `description`, followed
