@@ -1,0 +1,21 @@
+.env
+.env.*
+!.env.example
+node_modules/
+.next/
+dist/
+coverage/
+eval-results/
+tmp/
+*.log
+.DS_Store
+
+# Supplied review material may contain confidential data and personal information.
+reference/
+
+# Internal discovery notes are not part of the submitted exercise.
+docs/discovery-plan.md
+docs/public-product-evidence.md
+docs/review-pass-2.md
+docs/testing-evaluation-contract.md
+docs/v1-plan.md
