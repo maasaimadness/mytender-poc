@@ -1,0 +1,6 @@
+{
+  "id": "customer-outcomes", "version": "v1", "title": "Grounded customer outcomes", "scenario": "clean_generation",
+  "input": { "fixtureId": "customer-outcomes", "question": "Describe two customer outcomes.", "requirements": [{"id":"outcomes","text":"Describe two outcomes","mandatory":true}], "sourceDocuments": [{"id":"facts","role":"bidder_fact","title":"Sanitized bidder facts"}], "evidenceBlocks": [{"id":"outcome-a","documentId":"facts","locator":"derived:1","text":"Customers reduced handoff time by 20%."},{"id":"outcome-b","documentId":"facts","locator":"derived:2","text":"Customers improved completion accuracy to 98%."}], "maximumWords": 40 },
+  "allowedEvidenceBlockIds": ["outcome-a","outcome-b"], "forbiddenClaims": ["guaranteed savings"], "expectedWarningCodes": [], "expectedMissingRequirementIds": [],
+  "semanticRubric": {"criteria":["groundedness","evidence_relevance","writing_quality"]}
+}

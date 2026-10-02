@@ -1,0 +1,6 @@
+{
+  "id": "three-case-studies-gap", "version": "v1", "title": "Partial case study draft", "scenario": "partial_draft",
+  "input": { "fixtureId": "three-case-studies-gap", "question": "Provide three case studies.", "requirements": [{"id":"case-one","text":"First case study","mandatory":true},{"id":"case-two","text":"Second case study","mandatory":true},{"id":"case-three","text":"Third case study","mandatory":true}], "sourceDocuments": [{"id":"facts","role":"bidder_fact","title":"Sanitized bidder facts"}], "evidenceBlocks": [{"id":"case-a","documentId":"facts","locator":"derived:1","text":"Case A cut response time by 15%."},{"id":"case-b","documentId":"facts","locator":"derived:2","text":"Case B increased adoption by 12%."}], "maximumWords": 40 },
+  "allowedEvidenceBlockIds": ["case-a","case-b"], "forbiddenClaims": ["third customer achieved"], "expectedWarningCodes": ["INSUFFICIENT_EVIDENCE"], "expectedMissingRequirementIds": ["case-three"],
+  "semanticRubric": {"criteria":["requirement_coverage","groundedness","writing_quality"]}
+}
