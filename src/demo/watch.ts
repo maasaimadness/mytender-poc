@@ -150,7 +150,7 @@ function numberOrDash(value: unknown): string {
 }
 
 function optionalNumber(name: string, value: unknown): string {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? `${name}=${value}` : "";
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? `${name}=${Math.round(value)}` : "";
 }
 
 function stringArray(value: unknown): value is string[] {
