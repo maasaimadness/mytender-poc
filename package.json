@@ -10,6 +10,8 @@
     "eval:smoke": "node --import tsx src/evals/cli.ts"
   },
   "dependencies": {
+    "@openrouter/ai-sdk-provider": "^3.1.0",
+    "ai": "^7.0.127",
     "zod": "^4.1.12"
   },
   "devDependencies": {
