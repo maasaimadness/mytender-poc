@@ -4,6 +4,16 @@ import { pathToFileURL } from "node:url";
 
 type SidecarKind = "trace" | "memory";
 
+export interface WatchArgs {
+  latest: boolean;
+  help: boolean;
+}
+
+export interface RunDirectory {
+  path: string;
+  modified: number;
+}
+
 interface TailState {
   offset: number;
   remainder: Buffer;
@@ -11,6 +21,21 @@ interface TailState {
 }
 
 const emptyTail = (): TailState => ({ offset: 0, remainder: Buffer.alloc(0) });
+
+export function parseWatchArgs(args: readonly string[]): WatchArgs {
+  if (args.length === 0) return { latest: false, help: false };
+  if (args.length === 1 && args[0] === "--latest") return { latest: true, help: false };
+  if (args.length === 1 && args[0] === "--help") return { latest: false, help: true };
+  throw new Error("Unknown watcher argument. Use --help for supported options.");
+}
+
+export const watchUsage = (): string => "Usage: npm run demo:watch -- [--latest]";
+
+/** Chooses newest eligible directory; normal mode excludes the startup snapshot. */
+export function selectRunDirectory(runs: readonly RunDirectory[], startupPaths: ReadonlySet<string>, latest: boolean): string | undefined {
+  const eligible = latest ? runs : runs.filter((run) => !startupPaths.has(run.path));
+  return [...eligible].sort((left, right) => right.modified - left.modified || right.path.localeCompare(left.path))[0]?.path;
+}
 
 /** Formats only allow-listed trace metadata; source text and unknown fields never reach the terminal. */
 export function formatTraceEvent(value: unknown): string | undefined {
@@ -71,20 +96,27 @@ export function formatJsonlChunk(kind: SidecarKind, remainder: Buffer, chunk: Bu
   return { lines, remainder: combined.subarray(finalNewline + 1) };
 }
 
-async function newestRunDirectory(root: string): Promise<string | undefined> {
+async function runDirectories(root: string, warned: Set<string>): Promise<RunDirectory[]> {
   try {
     const entries = await readdir(root, { withFileTypes: true });
-    const candidates = await Promise.all(entries.filter((entry) => entry.isDirectory()).map(async (entry) => ({
-      path: join(root, entry.name),
-      modified: (await stat(join(root, entry.name))).mtimeMs,
-    })));
-    return candidates.sort((left, right) => right.modified - left.modified || right.path.localeCompare(left.path))[0]?.path;
-  } catch {
-    return undefined;
+    const candidates: RunDirectory[] = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const path = join(root, entry.name);
+      try {
+        candidates.push({ path, modified: (await stat(path)).mtimeMs });
+      } catch (error) {
+        warnUnreadable(error, `${path}:stat`, warned);
+      }
+    }
+    return candidates;
+  } catch (error) {
+    warnUnreadable(error, `${root}:readdir`, warned);
+    return [];
   }
 }
 
-async function tailSidecar(path: string, kind: SidecarKind, state: TailState): Promise<{ state: TailState; lines: string[] }> {
+async function tailSidecar(path: string, kind: SidecarKind, state: TailState, warned: Set<string>): Promise<{ state: TailState; lines: string[] }> {
   try {
     const info = await stat(path);
     const identity = `${info.ino}:${info.birthtimeMs}`;
@@ -93,13 +125,38 @@ async function tailSidecar(path: string, kind: SidecarKind, state: TailState): P
     const offset = reset ? 0 : state.offset;
     const formatted = formatJsonlChunk(kind, reset ? Buffer.alloc(0) : state.remainder, contents.subarray(offset));
     return { state: { offset: contents.length, remainder: formatted.remainder, identity }, lines: formatted.lines };
-  } catch {
+  } catch (error) {
+    warnUnreadable(error, `${path}:state`, warned);
     return { state, lines: [] };
   }
 }
 
+function warnUnreadable(error: unknown, key: string, warned: Set<string>): void {
+  if (isNotFound(error) || warned.has(key)) return;
+  warned.add(key);
+  process.stdout.write("Warning: unable to read demo sidecar state.\n");
+}
+
+function isNotFound(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+}
+
 async function main(): Promise<void> {
+  let args: WatchArgs;
+  try {
+    args = parseWatchArgs(process.argv.slice(2));
+  } catch (error) {
+    process.stdout.write(`Demo watch argument error: ${error instanceof Error ? error.message : "Unknown watcher argument."}\n${watchUsage()}\n`);
+    process.exitCode = 1;
+    return;
+  }
+  if (args.help) {
+    process.stdout.write(`${watchUsage()}\n`);
+    return;
+  }
   const root = resolve("tmp/demo");
+  const warned = new Set<string>();
+  const startupPaths = new Set((await runDirectories(root, warned)).map((run) => run.path));
   let current: string | undefined;
   let trace = emptyTail();
   let memory = emptyTail();
@@ -107,7 +164,7 @@ async function main(): Promise<void> {
   process.once("SIGINT", () => { stopped = true; });
   let announcedWaiting = false;
   while (!stopped) {
-    const newest = await newestRunDirectory(root);
+    const newest = selectRunDirectory(await runDirectories(root, warned), startupPaths, args.latest);
     if (!newest) {
       if (!announcedWaiting) process.stdout.write("Waiting for a demo run...\n");
       announcedWaiting = true;
@@ -119,9 +176,9 @@ async function main(): Promise<void> {
         memory = emptyTail();
         process.stdout.write(`Watching demo run: ${newest}\n`);
       }
-      const traced = await tailSidecar(join(newest, "trace.jsonl"), "trace", trace);
+      const traced = await tailSidecar(join(newest, "trace.jsonl"), "trace", trace, warned);
       trace = traced.state;
-      const remembered = await tailSidecar(join(newest, "memory.jsonl"), "memory", memory);
+      const remembered = await tailSidecar(join(newest, "memory.jsonl"), "memory", memory, warned);
       memory = remembered.state;
       for (const line of [...traced.lines, ...remembered.lines]) process.stdout.write(`${line}\n`);
     }

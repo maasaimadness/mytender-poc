@@ -12,6 +12,8 @@ import {
   type AgentSkillCatalog,
   type Workspace,
   type WorkspaceReview,
+  type AgentTraceEvent,
+  type AgentTraceSink,
 } from "../agent/index.js";
 import type { LanguageModel } from "ai";
 
@@ -58,6 +60,10 @@ export function parseDemoArgs(args: readonly string[]): ParsedDemoArgs {
 export const demoUsage = (): string => [
   "Usage: npm run demo -- [--question <text>] [--max-words <positive-int>]",
   "Runs only against SANITIZED / FICTIONAL bidder evidence.",
+  `Defaults: question=${JSON.stringify(DEFAULT_QUESTION)}; max words=${DEFAULT_MAXIMUM_WORDS}.`,
+  "Requires OPENROUTER_API_KEY and OPENROUTER_MODEL in ignored .env.",
+  "Watch redacted progress: npm run demo:watch",
+  'Example: npm run demo -- --question "Describe two measurable customer outcomes." --max-words 120',
 ].join("\n");
 
 export interface DemoRunResult {
@@ -72,6 +78,8 @@ export interface RunDemoOptions extends DemoOptions {
   modelLabel: string;
   artifactRoot?: string;
   skillRoot?: string;
+  /** Receives the same allow-listed events persisted to the redacted trace sidecar. */
+  onProgress?: (event: AgentTraceEvent) => void | Promise<void>;
 }
 
 /** Builds a new isolated workspace for a safe, fictional demonstration. */
@@ -92,10 +100,20 @@ export async function runDemo(options: RunDemoOptions): Promise<DemoRunResult> {
     workspaceId,
     skillCatalog,
     prompt: `Create a grounded tender response to this question: ${options.question}`,
-    traceSink: new JsonlAgentTraceSink(resolve(artifactDirectory, "trace.jsonl")),
+    traceSink: progressTraceSink(resolve(artifactDirectory, "trace.jsonl"), options.onProgress),
     memoryStore: new JsonlRunMemoryStore(resolve(artifactDirectory, "memory.jsonl")),
   });
   return { artifactDirectory, workspace: result.workspace, review: await service.reviewWorkspace(workspaceId), modelLabel: options.modelLabel };
+}
+
+function progressTraceSink(filePath: string, onProgress: RunDemoOptions["onProgress"]): AgentTraceSink {
+  const sink = new JsonlAgentTraceSink(filePath);
+  return {
+    async write(event) {
+      await sink.write(event);
+      await onProgress?.(event);
+    },
+  };
 }
 
 function demoWorkspace(id: string, options: DemoOptions): Workspace {
@@ -143,10 +161,25 @@ export function renderDemoResult(result: DemoRunResult): string {
     }
   }
   lines.push("", `Missing evidence: ${result.workspace.missingEvidence.map((gap) => `${gap.requirementId} (${gap.reason})`).join("; ") || "none"}`);
+  lines.push("Claims:");
+  if (result.workspace.claims.length === 0) lines.push("none");
+  for (const claim of result.workspace.claims) {
+    lines.push(`[${claim.status.toUpperCase()}] ${claim.text} -> ${claim.sourceBlockIds.join(", ") || "none"}`);
+  }
   lines.push(`Warnings: ${result.review.warningCodes.join(", ") || "none"}`);
   lines.push(`Readiness: ${result.review.readiness.canSubmit ? "READY" : "BLOCKED"} (${result.review.readiness.reasons.join(", ") || "none"})`);
+  if (!result.review.readiness.canSubmit) lines.push(`Next action: ${nextAction(result.review)}`);
   lines.push(`Artifacts: ${result.artifactDirectory}`);
   return lines.join("\n");
+}
+
+/** Maps deterministic review state to one concise recovery action. */
+export function nextAction(review: WorkspaceReview): string {
+  if (review.readiness.reasons.includes("WORD_LIMIT_EXCEEDED")) return "Reduce the draft to the word limit.";
+  if (review.unresolvedConflictGroups.length > 0) return "Resolve the conflicting evidence.";
+  if (review.missingRequirementIds.length > 0) return "Add bidder evidence for the missing requirements.";
+  if (review.citationIssues.length > 0 || review.claimIssues.length > 0) return "Review the evidence and citations.";
+  return "Inspect the readiness reason codes.";
 }
 
 function shortExcerpt(value: string): string {

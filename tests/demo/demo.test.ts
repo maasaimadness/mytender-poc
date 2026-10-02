@@ -4,8 +4,9 @@ import { join } from "node:path";
 import { MockLanguageModelV4 } from "ai/test";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { parseDemoArgs, renderDemoResult, runDemo, type DemoRunResult } from "../../src/demo/demo.js";
-import { formatJsonlChunk, formatMemoryRecord, formatTraceEvent } from "../../src/demo/watch.js";
+import { demoUsage, nextAction, parseDemoArgs, renderDemoResult, runDemo, type DemoRunResult } from "../../src/demo/demo.js";
+import { formatDemoError, formatDemoProgress } from "../../src/demo/cli.js";
+import { formatJsonlChunk, formatMemoryRecord, formatTraceEvent, parseWatchArgs, selectRunDirectory } from "../../src/demo/watch.js";
 
 const temporaryRoots: string[] = [];
 const usage = {
@@ -25,6 +26,9 @@ describe("demo CLI helpers", () => {
     for (const args of [["--question"], ["--max-words", "0"], ["--max-words", "two"], ["--unknown"]]) {
       expect(() => parseDemoArgs(args)).toThrow();
     }
+    expect(demoUsage()).toContain("OPENROUTER_API_KEY");
+    expect(formatDemoError(new Error("Missing OPENROUTER_API_KEY"))).toBe("Demo configuration error: Missing OPENROUTER_API_KEY. Update ignored .env and try again.");
+    expect(formatDemoError(new Error("provider body SECRET"))).toBe("Demo could not run. Check the provider/runtime configuration and try again.");
   });
 
   it("runs the real workspace, tools, skills, and redacted sidecars with a mocked model", async () => {
@@ -39,9 +43,12 @@ describe("demo CLI helpers", () => {
       toolCall("assess", "recordEvidenceAssessment", { assessment: { claims: [{ id: "outcome", text: "24% handoff-time reduction", sourceBlockIds: ["outcomes-01"], status: "supported" }] } }),
       { content: [{ type: "text", text: "MODEL_SENTINEL" }], finishReason: { unified: "stop", raw: undefined }, usage, warnings: [] },
     ] });
+    const progress: string[] = [];
     const result = await runDemo({
       question: "PROMPT_SENTINEL", maximumWords: 120, model, modelLabel: "safe-model", artifactRoot: root,
-      skillRoot: join(process.cwd(), "skills"),
+      skillRoot: join(process.cwd(), "skills"), onProgress: (event) => {
+        progress.push(formatDemoProgress(event));
+      },
     });
 
     expect(result.workspace.draft?.sections).toHaveLength(1);
@@ -56,6 +63,9 @@ describe("demo CLI helpers", () => {
     }
     expect(serialized).toContain("run_completed");
     expect(serialized).toContain("completed");
+    expect(progress[0]).toBe("Demo run started.");
+    expect(progress.some((line) => line.includes("recordEvidenceAssessment"))).toBe(true);
+    expect(progress.at(-1)).toBe("Demo run completed.");
   });
 
   it("renders source citations and both readiness states from persisted state", async () => {
@@ -63,9 +73,23 @@ describe("demo CLI helpers", () => {
     expect(renderDemoResult(ready)).toContain("Citation fact-01 (p1): SANITIZED DEMO evidence.");
     expect(renderDemoResult(ready)).toContain("Draft words: 2/unlimited");
     expect(renderDemoResult(ready)).toContain("Readiness: READY (none)");
+    expect(renderDemoResult(ready)).not.toContain("Next action:");
+    expect(renderDemoResult(ready)).toContain("[SUPPORTED] 24% handoff-time reduction -> fact-01");
     const blocked = sampleResult(false);
     expect(renderDemoResult(blocked)).toContain("Readiness: BLOCKED (MISSING_REQUIREMENTS)");
     expect(renderDemoResult(blocked)).toContain("Missing evidence: requirement (No matching evidence)");
+    expect(renderDemoResult(blocked)).toContain("Next action: Add bidder evidence for the missing requirements.");
+    expect(nextAction({ ...blocked.review, readiness: { canSubmit: false, reasons: ["WORD_LIMIT_EXCEEDED"] } })).toBe("Reduce the draft to the word limit.");
+  });
+
+  it("waits for a new run by default and supports --latest", () => {
+    const runs = [{ path: "/demo/old", modified: 1 }, { path: "/demo/new", modified: 2 }];
+    expect(selectRunDirectory(runs, new Set(["/demo/old"]), false)).toBe("/demo/new");
+    expect(selectRunDirectory(runs, new Set(["/demo/old", "/demo/new"]), false)).toBeUndefined();
+    expect(selectRunDirectory(runs, new Set(["/demo/old", "/demo/new"]), true)).toBe("/demo/new");
+    expect(parseWatchArgs([])).toEqual({ latest: false, help: false });
+    expect(parseWatchArgs(["--latest"])).toEqual({ latest: true, help: false });
+    expect(() => parseWatchArgs(["--old"])).toThrow("Unknown watcher argument. Use --help for supported options.");
   });
 
   it("formats only allow-listed sidecar metadata and retains partial lines", () => {
@@ -104,7 +128,7 @@ function sampleResult(ready: boolean): DemoRunResult {
       id: "demo-workspace", question: "Question", sourceDocuments: [{ id: "facts", role: "bidder_fact", title: "SANITIZED / FICTIONAL bidder evidence" }],
       sourceBlocks: [{ id: "fact-01", documentId: "facts", locator: "p1", text: "SANITIZED DEMO evidence." }], requirements: [{ id: "requirement", text: "Question", mandatory: true }],
       ...(ready ? { draft: { id: "draft", sections: [{ id: "section", heading: "Answer", content: "Grounded answer.", requirementIds: ["requirement"], citations: [{ sourceBlockId: "fact-01" }] }] } } : {}),
-      warnings: [], missingEvidence: ready ? [] : [{ requirementId: "requirement", reason: "No matching evidence" }], claims: [], retrievedBlockIds: [], events: [], conflictingEvidenceGroups: [],
+      warnings: [], missingEvidence: ready ? [] : [{ requirementId: "requirement", reason: "No matching evidence" }], claims: ready ? [{ id: "claim", text: "24% handoff-time reduction", sourceBlockIds: ["fact-01"], status: "supported" }] : [], retrievedBlockIds: [], events: [], conflictingEvidenceGroups: [],
     },
     review: { missingRequirementIds: ready ? [] : ["requirement"], citationIssues: [], claimIssues: [], unresolvedConflictGroups: [], warningCodes: [], readiness: { canSubmit: ready, reasons: ready ? [] : ["MISSING_REQUIREMENTS"] } },
   };
