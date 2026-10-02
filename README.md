@@ -101,3 +101,20 @@ The next block would add one deterministic tool for recording evidence gaps,
 conflicts, and claim status, then use the red live fixtures to drive it green.
 After that: a minimal question/document interface with section-level feedback,
 real document ingestion, and resumable runs for long bids.
+
+## Observability phase contract
+
+This phase adds four small blocks:
+
+1. Persist a complete evidence assessment and compute submission readiness.
+2. Load allow-listed repository skills instead of expanding the system prompt.
+3. Append redacted run and step metadata to JSONL traces.
+4. Append structured `completed`, `blocked`, or `failed` run memory.
+
+Workspace events remain the product audit history. Traces contain operational
+metadata only. Run memory contains distilled outcomes and next-action codes.
+None of these files may contain prompts, evidence text, drafts, tool arguments,
+tool results, provider bodies, credentials, or chain-of-thought.
+
+Each block must pass `npm test`, `npm run typecheck`, and `npm run eval:smoke`.
+Live evaluation remains blocked until a replacement OpenRouter key is available.
